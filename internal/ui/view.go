@@ -89,11 +89,8 @@ func (m *model) confirmOverlay() string {
 	} else {
 		for _, d := range m.confirmDiff {
 			b.WriteString(fmt.Sprintf("  %s\n", KeyStyle.Render(d.field+":")))
-			b.WriteString(fmt.Sprintf("    %s %s %s\n",
-				DiffOldStyle.Render(truncate(d.old, 48)),
-				DiffArrowStyle.Render("→"),
-				DiffNewStyle.Render(truncate(d.new, 48)),
-			))
+			b.WriteString(fmt.Sprintf("    %s %s\n", DiffOldStyle.Render("-"), DiffOldStyle.Render(d.old)))
+			b.WriteString(fmt.Sprintf("    %s %s\n", DiffNewStyle.Render("+"), DiffNewStyle.Render(d.new)))
 		}
 	}
 

@@ -10,7 +10,11 @@ import (
 
 func main() {
 	espPath := flag.String("esp", "", "Path to ESP mount point (e.g., /boot, /boot/efi, or custom)")
+	efiPath := flag.String("efi", "", "Alias for -esp")
 	flag.Parse()
+	if *espPath == "" && *efiPath != "" {
+		*espPath = *efiPath
+	}
 
 	p := tea.NewProgram(
 		ui.New(ui.WithESPPath(*espPath)),
