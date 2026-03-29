@@ -98,7 +98,13 @@ func discoverBoot(overridePath string) tea.Msg {
 		}
 	}
 	cfg, _ := boot.ParseLoaderConf(boot.FindLoaderConf(espPath))
-	entries, _ := boot.ParseEntries(boot.FindEntriesDir(espPath))
+	entries, err := boot.ParseEntries(boot.FindEntriesDir(espPath))
+	if err != nil {
+		return errMsg{err}
+	}
+	if entries == nil {
+		entries = []*boot.BootEntry{}
+	}
 	return bootLoaded{espPath, cfg, entries}
 }
 

@@ -2,28 +2,28 @@
 
 A terminal UI for managing systemd-boot — browse, view, and edit boot entries and loader configuration without touching config files directly.
 
-> **UI under active development.** Basic layout and navigation work; styling refinements ongoing.
-
 ---
 
-## Implemented
+## Features
 
-- Browse all boot entries in `/boot/loader/entries/`
-- View entry fields (title, version, linux, initrd, options, etc.)
-- View `loader.conf` settings (timeout, default, editor, etc.)
+- Browse all boot entries in `loader/entries/`
+- View and edit entry fields (title, version, linux, initrd, options, etc.)
+- View and edit `loader.conf` settings (timeout, default, editor, console-mode, etc.)
+- Inline editing with field-by-field navigation and required-field validation
+- Tab completion for ESP filesystem paths (linux, initrd, devicetree fields)
+- Context-sensitive help for each editable field
+- File preview overlay — view the raw `.conf` file for any entry or `loader.conf`
+- Last-modified timestamp shown for entries and loader config
 - Keyboard navigation with arrow keys or `j`/`k`
 - Tab/Shift+Tab to switch between panes
-- Basic edit mode (toggle with `e`, save with Enter, cancel with Escape)
+- Nord color theme
 
 ## Not yet implemented
 
-- **Inline field editing** — edit mode currently toggles but doesn't modify values
-- Set the default boot entry
+- Set the default boot entry interactively
 - Validate that referenced kernels and initrds exist on the ESP
-- Preview changes before writing
 - One-shot boot override (`LoaderEntryOneShot`)
 - EFI variable inspection
-- Unified Kernel Image (UKI) support
 - Anything involving `efibootmgr`
 
 ## Requirements
@@ -43,15 +43,15 @@ go build -o sdboot-tui .
 sudo mv sdboot-tui /usr/local/bin/
 ```
 
-Requires Go 1.21+.
+Requires Go 1.24+.
 
 ## Usage
 
 ```bash
-sdboot-tui [-esp /path/to/esp]
+sudo sdboot-tui [-esp /path/to/esp]
 ```
 
-Default ESP paths: `/boot`, `/boot/efi`, `/efi`
+Default ESP paths checked: `/boot`, `/boot/efi`, `/efi`
 
 ### Keyboard shortcuts
 
@@ -59,9 +59,13 @@ Default ESP paths: `/boot`, `/boot/efi`, `/efi`
 |-----|--------|
 | `↑`/`↓` or `j`/`k` | Navigate entry list |
 | `Tab`/`Shift+Tab` | Switch panes |
-| `e` | Toggle edit mode |
+| `e` | Enter edit mode |
+| `↑`/`↓` | Navigate fields (in edit mode) |
+| `Tab` | Next field / path completion (in edit mode) |
 | `Enter` | Save changes (in edit mode) |
 | `Escape` | Cancel editing |
+| `p` | Preview raw file (entries or loader.conf) |
+| `?` | Toggle help overlay |
 | `q`/`Ctrl+C` | Quit |
 
 ## Project structure
@@ -70,23 +74,24 @@ Default ESP paths: `/boot`, `/boot/efi`, `/efi`
 sdboot-tui/
 ├── main.go
 ├── internal/
-│   ├── boot/           # ESP discovery, entry parsing, loader.conf parsing
-│   └── ui/             # Bubble Tea TUI components
-│       ├── model.go    # Model, Update, key handling
-│       ├── view.go     # Layout, header, help bar
-│       ├── pane_entries.go   # Boot entries list pane
-│       ├── pane_detail.go    # Entry details pane
-│       ├── pane_loader.go    # loader.conf pane
-│       ├── styles.go   # Lip Gloss styles and colors
-│       └── helpers.go  # Utility functions
-└── README.md
+│   ├── boot/               # ESP discovery, entry and loader.conf parsing, validation
+│   └── ui/                 # Bubble Tea TUI
+│       ├── model.go        # Model, Update, key handling
+│       ├── view.go         # Layout, overlays, header, help bar
+│       ├── edit.go         # Inline editing, tab completion, field definitions
+│       ├── pane_entries.go # Boot entries list pane
+│       ├── pane_detail.go  # Entry details / edit pane
+│       ├── pane_loader.go  # loader.conf view / edit pane
+│       ├── styles.go       # Lip Gloss styles (Nord palette)
+│       └── helpers.go      # Utility functions
+└── testdata/               # Sample ESP layout for tests
 ```
 
 ## Built with
 
 - [Bubble Tea](https://github.com/charmbracelet/bubbletea) — TUI framework
-- [Bubbles](https://github.com/charmbracelet/bubbles) — reusable TUI components
-- [Lip Gloss](https://github.com/charmbracelet/lipgloss) — styling
+- [Bubbles](https://github.com/charmbracelet/bubbles) — reusable TUI components (textinput, spinner)
+- [Lip Gloss](https://github.com/charmbracelet/lipgloss) — terminal styling
 
 ## Contributing
 

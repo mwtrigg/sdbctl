@@ -72,7 +72,9 @@ func ParseEntry(path string) (*BootEntry, error) {
 		case "architecture":
 			entry.Architecture = value
 		default:
-			return nil, fmt.Errorf("%s:%d: unknown option: %s", path, lineNum, key)
+			// Skip unrecognized keys — real-world entries may contain
+			// vendor extensions or fields added in newer systemd versions.
+			continue
 		}
 	}
 
