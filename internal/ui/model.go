@@ -51,6 +51,9 @@ type model struct {
 	compIdx         int
 	showCompletions bool
 	validationErr   string
+	// save confirmation
+	confirming  bool
+	confirmDiff []diffLine
 	// file preview overlay
 	showPreview    bool
 	previewTitle   string
@@ -164,6 +167,17 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Close preview overlay on any key.
 	if m.showPreview {
 		m.showPreview = false
+		return m, nil
+	}
+
+	// Confirmation prompt: y to save, anything else cancels back to edit.
+	if m.confirming {
+		switch msg.String() {
+		case "y", "Y":
+			m.finalizeCommit()
+		default:
+			m.confirming = false // back to editing
+		}
 		return m, nil
 	}
 

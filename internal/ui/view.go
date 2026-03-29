@@ -32,6 +32,10 @@ func (m *model) View() string {
 		))
 	}
 
+	if m.confirming {
+		return m.confirmOverlay()
+	}
+
 	if m.showPreview {
 		return m.previewOverlay()
 	}
@@ -74,6 +78,37 @@ func (m *model) leftPaneWidth() int {
 		maxLeft = 45
 	}
 	return maxLeft
+}
+
+func (m *model) confirmOverlay() string {
+	var b strings.Builder
+	b.WriteString(HelpTitleStyle.Render(" Save changes? ") + "\n\n")
+
+	if len(m.confirmDiff) == 0 {
+		b.WriteString(HelpStyle.Render("  (no changes)") + "\n")
+	} else {
+		for _, d := range m.confirmDiff {
+			b.WriteString(fmt.Sprintf("  %s\n", KeyStyle.Render(d.field+":")))
+			b.WriteString(fmt.Sprintf("    %s %s %s\n",
+				DiffOldStyle.Render(truncate(d.old, 48)),
+				DiffArrowStyle.Render("→"),
+				DiffNewStyle.Render(truncate(d.new, 48)),
+			))
+		}
+	}
+
+	b.WriteString("\n")
+	b.WriteString(HelpStyle.Render("  [y] save   [any other key] back to editing"))
+
+	modal := HelpModalStyle.Render(b.String())
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, modal)
 }
 
 func (m *model) previewOverlay() string {

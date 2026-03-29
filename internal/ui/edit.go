@@ -258,10 +258,19 @@ func (m *model) editPrevField() {
 	m.loadFieldIntoInput()
 }
 
-func (m *model) commitEdit() {
+// diffLine represents a single changed field for the confirmation overlay.
+type diffLine struct {
+	field string
+	old   string
+	new   string
+}
+
+// prepareCommit validates the draft and, if valid, builds the diff and
+// enters the confirming state. The actual write happens in finalizeCommit.
+func (m *model) prepareCommit() {
 	m.saveInputToField()
 
-	// Validate required fields before committing.
+	// Validate required fields.
 	for _, f := range m.editFields {
 		if f.required && strings.TrimSpace(f.get()) == "" {
 			m.validationErr = f.label + " is required"
@@ -269,10 +278,19 @@ func (m *model) commitEdit() {
 		}
 	}
 	m.validationErr = ""
+
+	m.confirmDiff = m.buildDiff()
+	m.confirming = true
+}
+
+// finalizeCommit writes the confirmed draft to disk.
+func (m *model) finalizeCommit() {
 	m.editing = false
+	m.confirming = false
 	m.editFields = nil
 	m.completions = nil
 	m.showCompletions = false
+	m.confirmDiff = nil
 
 	if m.focused == paneDetail {
 		m.entry = m.draftEntry
@@ -288,6 +306,47 @@ func (m *model) commitEdit() {
 	}
 }
 
+// buildDiff compares the original and draft structs and returns changed fields.
+func (m *model) buildDiff() []diffLine {
+	var diff []diffLine
+
+	add := func(field, old, new string) {
+		if old != new {
+			diff = append(diff, diffLine{field, old, new})
+		}
+	}
+	boolStr := func(b *bool) string {
+		if b == nil {
+			return ""
+		}
+		if *b {
+			return "yes"
+		}
+		return "no"
+	}
+
+	if m.focused == paneDetail && m.entry != nil && m.draftEntry != nil {
+		e, d := m.entry, m.draftEntry
+		add("title", e.Title, d.Title)
+		add("version", e.Version, d.Version)
+		add("sort-key", e.SortKey, d.SortKey)
+		add("linux", e.Linux, d.Linux)
+		add("initrd", strings.Join(e.Initrds, ", "), strings.Join(d.Initrds, ", "))
+		add("options", strings.Join(e.Options, " "), strings.Join(d.Options, " "))
+		add("devicetree", e.Devicetree, d.Devicetree)
+	} else if m.focused == paneLoader && m.loaderConf != nil && m.draftLoader != nil {
+		l, d := m.loaderConf, m.draftLoader
+		add("timeout", l.Timeout, d.Timeout)
+		add("default", l.Default, d.Default)
+		add("editor", boolStr(l.Editor), boolStr(d.Editor))
+		add("console-mode", l.ConsoleMode, d.ConsoleMode)
+		add("auto-entries", boolStr(l.AutoEntries), boolStr(d.AutoEntries))
+		add("auto-firmware", boolStr(l.AutoFirmware), boolStr(d.AutoFirmware))
+	}
+
+	return diff
+}
+
 func (m *model) cancelEdit() {
 	m.draftEntry = nil
 	m.draftLoader = nil
@@ -296,6 +355,8 @@ func (m *model) cancelEdit() {
 	m.showCompletions = false
 	m.validationErr = ""
 	m.editing = false
+	m.confirming = false
+	m.confirmDiff = nil
 }
 
 // handleEditKey routes keyboard input while in edit mode.
@@ -307,7 +368,7 @@ func (m *model) handleEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cancelEdit()
 		return m, nil
 	case tea.KeyEnter:
-		m.commitEdit()
+		m.prepareCommit()
 		return m, nil
 	case tea.KeyUp:
 		m.editPrevField()
