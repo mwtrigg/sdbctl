@@ -2,7 +2,7 @@
 
 A terminal UI for managing systemd-boot — browse, view, and edit boot entries and loader configuration without touching config files directly.
 
-> **Early development.** Basic functionality works; inline editing is in progress.
+> **UI under active development.** Basic layout and navigation work; styling refinements ongoing.
 
 ---
 
@@ -70,8 +70,15 @@ Default ESP paths: `/boot`, `/boot/efi`, `/efi`
 sdboot-tui/
 ├── main.go
 ├── internal/
-│   ├── boot/       # ESP discovery, entry parsing, loader.conf parsing
-│   └── ui/         # Bubble Tea TUI components
+│   ├── boot/           # ESP discovery, entry parsing, loader.conf parsing
+│   └── ui/             # Bubble Tea TUI components
+│       ├── model.go    # Model, Update, key handling
+│       ├── view.go     # Layout, header, help bar
+│       ├── pane_entries.go   # Boot entries list pane
+│       ├── pane_detail.go    # Entry details pane
+│       ├── pane_loader.go    # loader.conf pane
+│       ├── styles.go   # Lip Gloss styles and colors
+│       └── helpers.go  # Utility functions
 └── README.md
 ```
 
