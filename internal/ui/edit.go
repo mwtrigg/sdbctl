@@ -284,6 +284,7 @@ func (m *model) commitEdit() {
 		m.loaderConf = m.draftLoader
 		m.draftLoader = nil
 		m.saveLoaderConf()
+		m.refreshLoaderMeta()
 	}
 }
 

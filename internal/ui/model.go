@@ -53,9 +53,11 @@ type model struct {
 	validationErr   string
 	// file preview overlay
 	showPreview    bool
+	previewTitle   string
 	previewContent string
-	// cached file metadata for the selected entry
-	entryModTime string
+	// cached file metadata
+	entryModTime  string
+	loaderModTime string
 }
 
 type Option func(*model)
@@ -123,6 +125,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.entry = m.entries[0]
 		}
 		m.refreshEntryMeta()
+		m.refreshLoaderMeta()
 		// Kick off async ESP path crawl for tab completion.
 		return m, crawlESP(msg.espPath)
 
@@ -193,8 +196,11 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.enterLoaderEditMode()
 			}
 		case "p":
-			if m.entry != nil {
-				m.loadPreview()
+			if m.focused == paneDetail && m.entry != nil {
+				m.loadEntryPreview()
+				m.showPreview = true
+			} else if m.focused == paneLoader && m.loaderConf != nil {
+				m.loadLoaderPreview()
 				m.showPreview = true
 			}
 		}
@@ -256,17 +262,42 @@ func (m *model) refreshEntryMeta() {
 	}
 }
 
-func (m *model) loadPreview() {
+func (m *model) loadEntryPreview() {
 	if m.entry == nil {
 		return
 	}
 	path := filepath.Join(m.espPath, "loader", "entries", m.entry.ID+".conf")
+	m.previewTitle = " " + m.entry.ID + ".conf "
 	data, err := os.ReadFile(path)
 	if err != nil {
 		m.previewContent = fmt.Sprintf("error reading file: %v", err)
 		return
 	}
 	m.previewContent = string(data)
+}
+
+func (m *model) loadLoaderPreview() {
+	path := filepath.Join(m.espPath, "loader", "loader.conf")
+	m.previewTitle = " loader.conf "
+	data, err := os.ReadFile(path)
+	if err != nil {
+		m.previewContent = fmt.Sprintf("error reading file: %v", err)
+		return
+	}
+	m.previewContent = string(data)
+}
+
+func (m *model) refreshLoaderMeta() {
+	if m.espPath == "" {
+		m.loaderModTime = ""
+		return
+	}
+	path := filepath.Join(m.espPath, "loader", "loader.conf")
+	if info, err := os.Stat(path); err == nil {
+		m.loaderModTime = info.ModTime().Format("2006-01-02 15:04")
+	} else {
+		m.loaderModTime = ""
+	}
 }
 
 func (m *model) saveEntry() {

@@ -91,6 +91,11 @@ func (m *model) loaderPane(width int) string {
 					content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render(f.key+":"), ValueStyle.Render(f.value)))
 				}
 			}
+
+			if m.loaderModTime != "" {
+				content.WriteString("\n")
+				content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("modified:"), HelpStyle.Render(m.loaderModTime)))
+			}
 		}
 	}
 

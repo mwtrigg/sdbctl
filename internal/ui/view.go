@@ -77,7 +77,7 @@ func (m *model) leftPaneWidth() int {
 }
 
 func (m *model) previewOverlay() string {
-	title := " " + m.entry.ID + ".conf "
+	title := m.previewTitle
 	content := lipgloss.JoinVertical(lipgloss.Top,
 		HelpTitleStyle.Render(title),
 		"",
@@ -152,7 +152,7 @@ func (m *model) helpBar() string {
 		if m.editing {
 			return HelpStyle.Render(" e: stop  |  Tab: switch  |  Enter: save  |  Esc: cancel  |  ?: help")
 		}
-		return HelpStyle.Render(" e: edit  |  Tab: switch  |  q: quit  |  ?: help")
+		return HelpStyle.Render(" e: edit  |  p: preview file  |  Tab: switch  |  q: quit  |  ?: help")
 	}
 	return ""
 }
