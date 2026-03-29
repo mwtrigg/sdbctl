@@ -1,11 +1,44 @@
 package ui
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 )
 
 func (m *model) View() string {
-	header := m.header()
+	if m.err != nil {
+		errText := ErrorStyle.Render(fmt.Sprintf(" Error: %s", m.err.Error()))
+		return OuterFrame.Render(lipgloss.JoinVertical(lipgloss.Top,
+			m.header(),
+			"\n",
+			errText,
+			"\n",
+			HelpStyle.Render(" Press q to quit"),
+		))
+	}
+
+	if m.entries == nil {
+		loadingText := lipgloss.JoinHorizontal(lipgloss.Left,
+			"  ",
+			m.spinner.View(),
+			"  Discovering boot entries...",
+		)
+		return OuterFrame.Render(lipgloss.JoinVertical(lipgloss.Top,
+			m.header(),
+			"\n",
+			PaneContentStyle.Render(loadingText),
+		))
+	}
+
+	if m.showPreview {
+		return m.previewOverlay()
+	}
+
+	if m.showHelp {
+		return m.helpOverlay()
+	}
 
 	leftColWidth := m.leftPaneWidth()
 
@@ -16,20 +49,14 @@ func (m *model) View() string {
 
 	mainArea := lipgloss.JoinHorizontal(lipgloss.Top,
 		leftColumn,
-		m.detailPane(),
+		m.detailPane(leftColWidth),
 	)
-
-	helpBar := m.helpBar()
 
 	appContent := lipgloss.JoinVertical(lipgloss.Top,
-		header,
+		m.header(),
 		mainArea,
-		helpBar,
+		m.helpBar(),
 	)
-
-	if m.showHelp {
-		return m.helpOverlay()
-	}
 
 	return OuterFrame.Render(appContent)
 }
@@ -37,16 +64,36 @@ func (m *model) View() string {
 func (m *model) leftPaneWidth() int {
 	w := m.width
 	if w <= 0 {
-		w = 100
+		w = 120
 	}
-	maxLeft := w / 6
-	if maxLeft < 24 {
-		maxLeft = 24
+	maxLeft := w / 4
+	if maxLeft < 28 {
+		maxLeft = 28
 	}
-	if maxLeft > 30 {
-		maxLeft = 30
+	if maxLeft > 45 {
+		maxLeft = 45
 	}
 	return maxLeft
+}
+
+func (m *model) previewOverlay() string {
+	title := " " + m.entry.ID + ".conf "
+	content := lipgloss.JoinVertical(lipgloss.Top,
+		HelpTitleStyle.Render(title),
+		"",
+		PaneContentStyle.Render(m.previewContent),
+		"",
+		HelpStyle.Render(" Press any key to close"),
+	)
+	modal := HelpModalStyle.Render(content)
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, modal)
 }
 
 func (m *model) helpOverlay() string {
@@ -98,9 +145,9 @@ func (m *model) helpBar() string {
 		return HelpStyle.Render(" ↑/↓: navigate  |  Tab: switch  |  e: edit  |  q: quit  |  ?: help")
 	case paneDetail:
 		if m.editing {
-			return HelpStyle.Render(" e: stop  |  Tab: switch  |  Enter: save  |  Esc: cancel  |  ?: help")
+			return HelpStyle.Render(" ↑/↓: field  |  Tab: next/complete  |  Enter: save  |  Esc: cancel  |  ?: help")
 		}
-		return HelpStyle.Render(" e: edit  |  Tab: switch  |  q: quit  |  ?: help")
+		return HelpStyle.Render(" e: edit  |  p: preview file  |  Tab: switch  |  q: quit  |  ?: help")
 	case paneLoader:
 		if m.editing {
 			return HelpStyle.Render(" e: stop  |  Tab: switch  |  Enter: save  |  Esc: cancel  |  ?: help")
@@ -110,49 +157,32 @@ func (m *model) helpBar() string {
 	return ""
 }
 
+// paneTitleRow renders a centered title line + separator, embedded directly
+// inside the pane border — no nested box, no double-border gap.
 func (m *model) paneTitleRow(title string, editing bool, width int) string {
-	titleText := " " + title + " "
+	titleText := title
 	if editing {
-		titleText += "[EDITING] "
+		titleText += "  " + PaneEditingStyle.Render("[EDITING]")
 	}
-
-	headerStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(DimmerGreen).
-		Foreground(DimmerGreen).
-		Padding(0, 1).
-		Width(width)
-
-	return headerStyle.Render(titleText)
+	titleLine := PaneTitleStyle.Width(width).Align(lipgloss.Center).Render(titleText)
+	sep := KeyStyle.Render(strings.Repeat("─", width))
+	return lipgloss.JoinVertical(lipgloss.Top, titleLine, sep)
 }
 
 func (m *model) header() string {
-	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#1E3A5F")).
-		Bold(true)
-
-	versionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#88AACC")).
-		Background(lipgloss.Color("#1E3A5F")).
-		Bold(true)
-
-	repoStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#88AACC")).
-		Background(lipgloss.Color("#1E3A5F"))
-
-	headerContent := lipgloss.JoinHorizontal(lipgloss.Left,
-		titleStyle.Render(" sdboot-tui "),
-		versionStyle.Render(" "+AppVersion+" "),
-		repoStyle.Render(" "+AppRepo),
+	// OuterFrame border takes 2 chars per side. Header bg fills the rest flush.
+	w := m.width - 4
+	if w < 20 {
+		w = 20
+	}
+	content := lipgloss.JoinHorizontal(lipgloss.Left,
+		HeaderTitleStyle.Render(" sdboot-tui "),
+		HeaderTitleStyle.Render(" "+AppVersion+" "),
+		HeaderMetaStyle.Render(" "+AppRepo),
 	)
-
-	headerBox := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(DimmerGreen).
-		Margin(3).
-		Width(m.width - 8).
-		Padding(0, 1)
-
-	return headerBox.Render(headerContent)
+	return lipgloss.NewStyle().
+		Background(ColorHeaderBg).
+		Width(w).
+		Padding(0, 1).
+		Render(content)
 }

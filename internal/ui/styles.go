@@ -4,56 +4,90 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Nord color palette
 var (
-	DimmerGreen = lipgloss.Color("#229922")
-	BrightGreen = lipgloss.Color("#33FF33")
+	ColorBorderDim    = lipgloss.Color("#4C566A")
+	ColorBorderFocus  = lipgloss.Color("#88C0D0")
+	ColorKeyText      = lipgloss.Color("#81A1C1")
+	ColorValueText    = lipgloss.Color("#ECEFF4")
+	ColorSelected     = lipgloss.Color("#5E81AC")
+	ColorSelectedText = lipgloss.Color("#ECEFF4")
+	ColorHeaderBg     = lipgloss.Color("#2E3440")
+	ColorHeaderText   = lipgloss.Color("#ECEFF4")
+	ColorMeta         = lipgloss.Color("#616E88")
+	ColorAmber        = lipgloss.Color("#EBCB8B")
+	ColorError        = lipgloss.Color("#BF616A")
 
 	BorderStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(DimmerGreen)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorBorderDim)
 
 	FocusBorderStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(BrightGreen)
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(ColorBorderFocus)
 
 	PaneTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(DimmerGreen).
+			Foreground(ColorBorderFocus).
 			Padding(0, 1)
 
 	PaneEditingStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#FFAA00")).
-			Padding(0, 1)
+				Bold(true).
+				Foreground(ColorAmber).
+				Padding(0, 1)
 
 	PaneContentStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#33CC33"))
+				Foreground(ColorValueText)
 
 	SelectedItemStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#001100")).
-			Background(lipgloss.Color("#33FF33"))
+				Foreground(ColorSelectedText).
+				Background(ColorSelected)
 
 	ItemStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#33CC33"))
+			Foreground(ColorValueText)
 
 	KeyStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#229922"))
+			Foreground(ColorKeyText)
 
 	ValueStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#33FF33"))
+			Foreground(ColorValueText)
 
 	HelpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#888888"))
+			Foreground(ColorMeta)
+
+	ErrorStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ColorError)
+
+	DimValueStyle = lipgloss.NewStyle().
+			Foreground(ColorMeta)
+
+	FieldHelpStyle = lipgloss.NewStyle().
+			Foreground(ColorMeta).
+			Italic(true)
+
+	RequiredStyle = lipgloss.NewStyle().
+			Foreground(ColorAmber).
+			Bold(true)
+
+	HeaderTitleStyle = lipgloss.NewStyle().
+				Foreground(ColorHeaderText).
+				Background(ColorHeaderBg).
+				Bold(true)
+
+	HeaderMetaStyle = lipgloss.NewStyle().
+				Foreground(ColorMeta).
+				Background(ColorHeaderBg)
 
 	OuterFrame = lipgloss.NewStyle().
-			Border(lipgloss.ThickBorder()).
-			BorderForeground(lipgloss.Color("#33FF33")).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorBorderFocus).
 			Padding(0, 0)
 
 	HelpModalStyle = lipgloss.NewStyle().
-			Border(lipgloss.ThickBorder()).
-			BorderForeground(lipgloss.Color("#33FF33")).
-			Foreground(lipgloss.Color("#33FF33")).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorBorderFocus).
+			Foreground(ColorValueText).
 			Padding(1, 2)
 
 	HelpTitleStyle = lipgloss.NewStyle().

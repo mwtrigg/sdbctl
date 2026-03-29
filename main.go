@@ -4,7 +4,7 @@ import (
 	"flag"
 	"os"
 
-	"github.com/charmbracelet/bubbletea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mwtrigg/sdboot-tui/internal/ui"
 )
 

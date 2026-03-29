@@ -1,10 +1,13 @@
 package ui
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mwtrigg/sdboot-tui/internal/boot"
 )
 
@@ -37,6 +40,22 @@ type model struct {
 	height     int
 	err        error
 	spinner    spinner.Model
+	// editing state
+	draftEntry      *boot.BootEntry
+	draftLoader     *boot.LoaderConfig
+	editInput       textinput.Model
+	editFields      []fieldDesc
+	editFieldIdx    int
+	espPaths        []string
+	completions     []string
+	compIdx         int
+	showCompletions bool
+	validationErr   string
+	// file preview overlay
+	showPreview    bool
+	previewContent string
+	// cached file metadata for the selected entry
+	entryModTime string
 }
 
 type Option func(*model)
@@ -49,7 +68,8 @@ func WithESPPath(path string) Option {
 
 func New(opts ...Option) *model {
 	m := &model{
-		spinner: spinner.New(),
+		spinner:   spinner.New(),
+		editInput: textinput.New(),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -75,10 +95,8 @@ func discoverBoot(overridePath string) tea.Msg {
 			return errMsg{err}
 		}
 	}
-
 	cfg, _ := boot.ParseLoaderConf(boot.FindLoaderConf(espPath))
 	entries, _ := boot.ParseEntries(boot.FindEntriesDir(espPath))
-
 	return bootLoaded{espPath, cfg, entries}
 }
 
@@ -88,9 +106,7 @@ type bootLoaded struct {
 	entries    []*boot.BootEntry
 }
 
-type errMsg struct {
-	err error
-}
+type errMsg struct{ err error }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -106,6 +122,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.entries) > 0 {
 			m.entry = m.entries[0]
 		}
+		m.refreshEntryMeta()
+		// Kick off async ESP path crawl for tab completion.
+		return m, crawlESP(msg.espPath)
+
+	case espPathsLoaded:
+		m.espPaths = msg.paths
 		return m, nil
 
 	case errMsg:
@@ -116,12 +138,30 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	}
 
-	var cmd tea.Cmd
-	m.spinner, cmd = m.spinner.Update(msg)
-	return m, cmd
+	// Forward non-key messages to textinput (cursor blink) and spinner.
+	var cmds []tea.Cmd
+	if m.editing {
+		var inputCmd tea.Cmd
+		m.editInput, inputCmd = m.editInput.Update(msg)
+		cmds = append(cmds, inputCmd)
+	}
+	var spinnerCmd tea.Cmd
+	m.spinner, spinnerCmd = m.spinner.Update(msg)
+	cmds = append(cmds, spinnerCmd)
+	return m, tea.Batch(cmds...)
 }
 
 func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Close preview overlay on any key.
+	if m.showPreview {
+		m.showPreview = false
+		return m, nil
+	}
+
+	if m.editing {
+		return m.handleEditKey(msg)
+	}
+
 	keyStr := msg.String()
 
 	switch msg.Type {
@@ -134,61 +174,45 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "?":
 			m.showHelp = !m.showHelp
-			return m, nil
 		case "k":
-			if m.focused == paneEntries {
-				if m.selected > 0 {
-					m.selected--
-					m.entry = m.entries[m.selected]
-				}
-			}
-			return m, nil
-		case "j":
-			if m.focused == paneEntries {
-				if m.selected < len(m.entries)-1 {
-					m.selected++
-					m.entry = m.entries[m.selected]
-				}
-			}
-			return m, nil
-		case "e":
-			if m.focused == paneDetail {
-				m.editing = !m.editing
-			}
-			return m, nil
-		case "b", "escape":
-			if m.editing {
-				m.editing = false
-			}
-			return m, nil
-		case "enter":
-			if m.editing {
-				if m.focused == paneDetail {
-					m.saveEntry()
-				} else if m.focused == paneLoader {
-					m.saveLoaderConf()
-				}
-			}
-			return m, nil
-		}
-
-	case tea.KeyUp:
-		if m.focused == paneEntries {
-			if m.selected > 0 {
+			if m.focused == paneEntries && m.selected > 0 {
 				m.selected--
 				m.entry = m.entries[m.selected]
+				m.refreshEntryMeta()
+			}
+		case "j":
+			if m.focused == paneEntries && m.selected < len(m.entries)-1 {
+				m.selected++
+				m.entry = m.entries[m.selected]
+				m.refreshEntryMeta()
+			}
+		case "e":
+			if m.focused == paneDetail {
+				return m, m.enterEntryEditMode()
+			} else if m.focused == paneLoader {
+				return m, m.enterLoaderEditMode()
+			}
+		case "p":
+			if m.entry != nil {
+				m.loadPreview()
+				m.showPreview = true
 			}
 		}
 		return m, nil
 
-	case tea.KeyDown:
-		if m.focused == paneEntries {
-			if m.selected < len(m.entries)-1 {
-				m.selected++
-				m.entry = m.entries[m.selected]
-			}
+	case tea.KeyUp:
+		if m.focused == paneEntries && m.selected > 0 {
+			m.selected--
+			m.entry = m.entries[m.selected]
+			m.refreshEntryMeta()
 		}
-		return m, nil
+
+	case tea.KeyDown:
+		if m.focused == paneEntries && m.selected < len(m.entries)-1 {
+			m.selected++
+			m.entry = m.entries[m.selected]
+			m.refreshEntryMeta()
+		}
 
 	case tea.KeyTab:
 		switch m.focused {
@@ -199,7 +223,6 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case paneLoader:
 			m.focused = paneEntries
 		}
-		return m, nil
 
 	case tea.KeyShiftTab:
 		switch m.focused {
@@ -210,26 +233,40 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case paneLoader:
 			m.focused = paneDetail
 		}
-		return m, nil
 
 	case tea.KeyEscape:
-		if m.editing {
-			m.editing = false
+		if m.showHelp {
+			m.showHelp = false
 		}
-		return m, nil
-
-	case tea.KeyEnter:
-		if m.editing {
-			if m.focused == paneDetail {
-				m.saveEntry()
-			} else if m.focused == paneLoader {
-				m.saveLoaderConf()
-			}
-		}
-		return m, nil
 	}
 
 	return m, nil
+}
+
+func (m *model) refreshEntryMeta() {
+	if m.entry == nil || m.espPath == "" {
+		m.entryModTime = ""
+		return
+	}
+	path := filepath.Join(m.espPath, "loader", "entries", m.entry.ID+".conf")
+	if info, err := os.Stat(path); err == nil {
+		m.entryModTime = info.ModTime().Format("2006-01-02 15:04")
+	} else {
+		m.entryModTime = ""
+	}
+}
+
+func (m *model) loadPreview() {
+	if m.entry == nil {
+		return
+	}
+	path := filepath.Join(m.espPath, "loader", "entries", m.entry.ID+".conf")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		m.previewContent = fmt.Sprintf("error reading file: %v", err)
+		return
+	}
+	m.previewContent = string(data)
 }
 
 func (m *model) saveEntry() {
@@ -239,16 +276,12 @@ func (m *model) saveEntry() {
 	path := filepath.Join(m.espPath, "loader", "entries", m.entry.ID+".conf")
 	if err := m.entry.Write(path); err != nil {
 		m.err = err
-		return
 	}
-	m.editing = false
 }
 
 func (m *model) saveLoaderConf() {
 	path := filepath.Join(m.espPath, "loader", "loader.conf")
 	if err := m.loaderConf.Write(path); err != nil {
 		m.err = err
-		return
 	}
-	m.editing = false
 }
