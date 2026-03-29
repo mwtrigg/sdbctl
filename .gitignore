@@ -1,0 +1,16 @@
+# Compiled binary
+sdboot-tui
+sdboot-tui-*
+
+# Go build artifacts
+*.test
+*.out
+/vendor/
+
+# OS / editor noise
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
