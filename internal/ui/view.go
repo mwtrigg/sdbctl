@@ -147,6 +147,9 @@ func (m *model) helpBar() string {
 		if m.editing {
 			return HelpStyle.Render(" ↑/↓: field  |  Tab: next/complete  |  Enter: save  |  Esc: cancel  |  ?: help")
 		}
+		if m.entry != nil && m.entry.IsUKI {
+			return HelpStyle.Render(" p: preview file  |  Tab: switch  |  q: quit  |  ?: help")
+		}
 		return HelpStyle.Render(" e: edit  |  p: preview file  |  Tab: switch  |  q: quit  |  ?: help")
 	case paneLoader:
 		if m.editing {

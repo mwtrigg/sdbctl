@@ -17,12 +17,17 @@ func (m *model) entriesPane(width int) string {
 	var items strings.Builder
 	for i, entry := range m.entries {
 		title := entry.DisplayTitle()
+		badge := ""
+		if entry.IsUKI {
+			badge = UKIBadgeStyle.Render("[UKI] ")
+		}
 
 		style := ItemStyle.Width(width)
 		if i == m.selected {
 			style = SelectedItemStyle.Width(width)
 		}
-		items.WriteString(style.Render(truncate(title, width)) + "\n")
+		line := badge + style.Render(truncate(title, width-lipgloss.Width(badge)))
+		items.WriteString(line + "\n")
 	}
 
 	if len(m.entries) == 0 {

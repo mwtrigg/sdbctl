@@ -19,6 +19,8 @@ type BootEntry struct {
 	Devicetree   string
 	DTOOverlays  []string
 	Architecture string
+	IsUKI        bool   // true for entries discovered from EFI/Linux/*.efi
+	EFIPath      string // set for UKI entries: /EFI/Linux/<id>.efi
 }
 
 func ParseEntry(path string) (*BootEntry, error) {
@@ -187,9 +189,12 @@ func parseUKIs(dir string) ([]*BootEntry, error) {
 			continue
 		}
 
+		id := strings.TrimSuffix(entry.Name(), ".efi")
 		uki := &BootEntry{
-			ID:    strings.TrimSuffix(entry.Name(), ".efi"),
-			Title: strings.TrimSuffix(entry.Name(), ".efi"),
+			ID:      id,
+			Title:   id,
+			IsUKI:   true,
+			EFIPath: "/EFI/Linux/" + entry.Name(),
 		}
 		result = append(result, uki)
 	}

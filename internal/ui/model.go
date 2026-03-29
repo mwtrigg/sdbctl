@@ -98,7 +98,7 @@ func discoverBoot(overridePath string) tea.Msg {
 		}
 	}
 	cfg, _ := boot.ParseLoaderConf(boot.FindLoaderConf(espPath))
-	entries, err := boot.ParseEntries(boot.FindEntriesDir(espPath))
+	entries, err := boot.ParseAllEntries(espPath)
 	if err != nil {
 		return errMsg{err}
 	}
@@ -196,13 +196,13 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.refreshEntryMeta()
 			}
 		case "e":
-			if m.focused == paneDetail {
+			if m.focused == paneDetail && m.entry != nil && !m.entry.IsUKI {
 				return m, m.enterEntryEditMode()
 			} else if m.focused == paneLoader {
 				return m, m.enterLoaderEditMode()
 			}
 		case "p":
-			if m.focused == paneDetail && m.entry != nil {
+			if m.focused == paneDetail && m.entry != nil && !m.entry.IsUKI {
 				m.loadEntryPreview()
 				m.showPreview = true
 			} else if m.focused == paneLoader && m.loaderConf != nil {

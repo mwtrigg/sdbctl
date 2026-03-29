@@ -105,6 +105,13 @@ func (m *model) detailPane(leftColWidth int) string {
 		// View mode
 		if m.entry == nil {
 			content.WriteString(" Select an entry from the list\n")
+		} else if m.entry.IsUKI {
+			content.WriteString(fmt.Sprintf(" ID: %s\n\n", m.entry.ID))
+			content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("type:"), UKIBadgeStyle.Render("Unified Kernel Image")))
+			content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("efi:"), ValueStyle.Render(m.entry.EFIPath)))
+			content.WriteString("\n")
+			content.WriteString(" " + HelpStyle.Render("Kernel, initrd, and cmdline are") + "\n")
+			content.WriteString(" " + HelpStyle.Render("embedded in the EFI binary.") + "\n")
 		} else {
 			content.WriteString(fmt.Sprintf(" ID: %s\n\n", m.entry.ID))
 

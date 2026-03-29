@@ -17,6 +17,7 @@ var (
 	ColorMeta         = lipgloss.Color("#616E88")
 	ColorAmber        = lipgloss.Color("#EBCB8B")
 	ColorError        = lipgloss.Color("#BF616A")
+	ColorUKI          = lipgloss.Color("#A3BE8C") // Nord aurora green
 
 	BorderStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -68,6 +69,10 @@ var (
 
 	RequiredStyle = lipgloss.NewStyle().
 			Foreground(ColorAmber).
+			Bold(true)
+
+	UKIBadgeStyle = lipgloss.NewStyle().
+			Foreground(ColorUKI).
 			Bold(true)
 
 	HeaderTitleStyle = lipgloss.NewStyle().
