@@ -1,25 +1,26 @@
 # sdboot-tui
 
-A terminal UI for managing systemd-boot — browse, edit, and validate boot entries and loader configuration without touching config files directly.
+A terminal UI for managing systemd-boot — browse, view, and edit boot entries and loader configuration without touching config files directly.
 
-> ⚠️ **Early development.** Not yet ready for production use. Things will break, change, and generally misbehave.
+> **Early development.** Basic functionality works; inline editing is in progress.
 
 ---
 
-## What it does
-
-systemd-boot is simple by design, which means managing it usually means opening files in `/boot/loader/` by hand. `sdboot-tui` provides a keyboard-driven interface for the things you actually want to do:
-- Nothing.  This tool doesn't do anything, and frankly doesn't even exist.  I'm just spitballing
-
-
-## What it doesn't do (yet)
+## Implemented
 
 - Browse all boot entries in `/boot/loader/entries/`
-- View and edit entry fields (title, linux, initrd, options, etc.)
-- View and edit `loader.conf` (timeout, default entry, etc.)
+- View entry fields (title, version, linux, initrd, options, etc.)
+- View `loader.conf` settings (timeout, default, editor, etc.)
+- Keyboard navigation with arrow keys or `j`/`k`
+- Tab/Shift+Tab to switch between panes
+- Basic edit mode (toggle with `e`, save with Enter, cancel with Escape)
+
+## Not yet implemented
+
+- **Inline field editing** — edit mode currently toggles but doesn't modify values
 - Set the default boot entry
-- Validate that referenced kernels and initrds exist on the ESP before saving
-- Preview changes before writing to disk
+- Validate that referenced kernels and initrds exist on the ESP
+- Preview changes before writing
 - One-shot boot override (`LoaderEntryOneShot`)
 - EFI variable inspection
 - Unified Kernel Image (UKI) support
@@ -44,17 +45,24 @@ sudo mv sdboot-tui /usr/local/bin/
 
 Requires Go 1.21+.
 
-### Arch Linux (AUR)
-
-_Coming eventually._
-
 ## Usage
 
 ```bash
-sudo sdboot
+sdboot-tui [-esp /path/to/esp]
 ```
 
-Navigate with arrow keys, confirm actions with Enter, quit with `q` or `Ctrl+C`.
+Default ESP paths: `/boot`, `/boot/efi`, `/efi`
+
+### Keyboard shortcuts
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓` or `j`/`k` | Navigate entry list |
+| `Tab`/`Shift+Tab` | Switch panes |
+| `e` | Toggle edit mode |
+| `Enter` | Save changes (in edit mode) |
+| `Escape` | Cancel editing |
+| `q`/`Ctrl+C` | Quit |
 
 ## Project structure
 
@@ -75,7 +83,7 @@ sdboot-tui/
 
 ## Contributing
 
-This is a personal project in early development. Issues and PRs welcome, but expect things to move around a lot in the short term.
+This is a personal project in early development. Issues and PRs welcome.
 
 ## License
 
