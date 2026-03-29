@@ -41,16 +41,13 @@ func ParseEntry(path string) (*BootEntry, error) {
 			continue
 		}
 
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) != 2 {
-			if parts[0] != "" {
-				return nil, fmt.Errorf("%s:%d: malformed line: %s", path, lineNum, line)
-			}
-			continue
+		// Split on first run of whitespace (space or tab).
+		idx := strings.IndexAny(line, " \t")
+		if idx < 0 {
+			return nil, fmt.Errorf("%s:%d: malformed line: %s", path, lineNum, line)
 		}
-
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
+		key := line[:idx]
+		value := strings.TrimSpace(line[idx:])
 
 		switch key {
 		case "title":
