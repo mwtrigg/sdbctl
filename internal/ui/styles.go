@@ -103,6 +103,6 @@ var (
 			Bold(true).
 			Foreground(lipgloss.Color("#FFFFFF"))
 
-	AppVersion = "v0.1.0"
+	AppVersion = "v1.0.0"
 	AppRepo    = "https://codeberg.org/mwtrigg/sdboot-tui"
 )
