@@ -60,6 +60,14 @@ sudo sdboot-tui [-esp /path/to/esp]
 
 Default ESP paths checked: `/boot`, `/boot/efi`, `/efi`
 
+The `-esp` flag is useful in chroot environments (e.g. during Arch installation or system recovery):
+
+```bash
+sudo sdboot-tui -esp /mnt/boot
+```
+
+Note: one-shot boot (`o` key) writes to `/sys/firmware/efi/efivars` on the **running** system, not the chroot target — it will not work as expected from inside a chroot.
+
 ### Keyboard shortcuts
 
 | Key | Action |

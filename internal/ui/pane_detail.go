@@ -25,7 +25,11 @@ func (m *model) detailPane(leftColWidth int) string {
 	var content strings.Builder
 
 	if isEditing && m.draftEntry != nil {
-		content.WriteString(fmt.Sprintf(" ID: %s\n\n", m.draftEntry.ID))
+		draftFilename := m.draftEntry.ID
+		if !m.creating && draftFilename != "" {
+			draftFilename += ".conf"
+		}
+		content.WriteString(fmt.Sprintf(" file: %s\n\n", draftFilename))
 
 		if len(m.editFields) == 0 {
 			content.WriteString(FieldHelpStyle.Render(" No editable fields — implement buildEntryFields() in edit.go") + "\n")
@@ -109,14 +113,14 @@ func (m *model) detailPane(leftColWidth int) string {
 		if m.entry == nil {
 			content.WriteString(" Select an entry from the list\n")
 		} else if m.entry.IsUKI {
-			content.WriteString(fmt.Sprintf(" ID: %s\n\n", m.entry.ID))
+			content.WriteString(fmt.Sprintf(" file: %s\n\n", m.entry.ID+".efi"))
 			content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("type:"), UKIBadgeStyle.Render("Unified Kernel Image")))
 			content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("efi:"), ValueStyle.Render(m.entry.EFIPath)))
 			content.WriteString("\n")
 			content.WriteString(" " + HelpStyle.Render("Kernel, initrd, and cmdline are") + "\n")
 			content.WriteString(" " + HelpStyle.Render("embedded in the EFI binary.") + "\n")
 		} else {
-			content.WriteString(fmt.Sprintf(" ID: %s\n\n", m.entry.ID))
+			content.WriteString(fmt.Sprintf(" file: %s\n\n", m.entry.ID+".conf"))
 
 			fields := []struct {
 				key   string
