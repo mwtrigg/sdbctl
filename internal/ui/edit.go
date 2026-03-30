@@ -132,7 +132,7 @@ func (m *model) buildEntryFields() {
 			set:      func(v string) { e.ID = strings.TrimSpace(v) },
 			required: true,
 			validate: validateEntryID,
-			help:     "Filename for this entry without the .conf extension (e.g. arch-linux). No spaces or path separators.",
+			help:     "Filename without .conf (e.g. arch-linux). Written to loader/entries/<id>.conf on the ESP. No spaces or path separators. Note: UKI entries (.efi) cannot be created here — they are discovered automatically from EFI/Linux/.",
 		})
 	}
 

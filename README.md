@@ -2,6 +2,43 @@
 
 A terminal UI for managing systemd-boot — browse, create, edit, and delete boot entries and loader configuration without touching config files directly.
 
+> **Home repository:** [codeberg.org/mwtrigg/sdboot-tui](https://codeberg.org/mwtrigg/sdboot-tui)
+> GitHub ([github.com/mwtrigg/sdboot-tui](https://github.com/mwtrigg/sdboot-tui)) is a mirror.
+
+---
+
+## ⚠️ Security and Safety Warning
+
+**This tool requires root (`sudo`) access and writes directly to your EFI System Partition.**
+
+Before using, understand the following risks:
+
+- **System may become unbootable** — incorrect paths for `linux` or `initrd` fields, or deleting a critical entry, can prevent your system from booting. Always verify paths against what actually exists on your ESP.
+- **No undo** — file writes and deletions are immediate and permanent. There is no backup or undo functionality.
+- **Kernel command-line exposure** — the `options` field is passed directly to the kernel at boot. Mistakes here (e.g. wrong `root=` UUID) will cause boot failure or unintended kernel behaviour.
+- **ESP filesystem corruption** — the ESP is a FAT32 partition. Interrupted writes can corrupt it. Do not run this tool on an unstable system or over an unreliable connection.
+- **EFI variable modification** — the one-shot boot feature writes EFI NVRAM variables directly. Interrupting an EFI variable write on some firmware implementations can leave the variable store in an inconsistent state.
+- **Supply chain risk** — running any tool as root that was downloaded from the internet carries inherent risk. Review the source code before use, or build from source on a trusted machine.
+
+---
+
+## Screenshots
+
+<!-- screenshot: main view — entries list, detail pane, and loader pane -->
+*Main view*
+
+<!-- screenshot: edit mode — field-by-field editing with tab completion dropdown -->
+*Editing a boot entry*
+
+<!-- screenshot: save confirmation diff — changes shown before writing to disk -->
+*Save confirmation with diff view*
+
+<!-- screenshot: console-mode resolution preview — mock boot screen at 80×25 -->
+*Console-mode resolution preview*
+
+<!-- screenshot: ESP validation warning — [!] badge and missing-file errors -->
+*ESP validation warnings*
+
 ---
 
 ## Features
@@ -44,7 +81,7 @@ A terminal UI for managing systemd-boot — browse, create, edit, and delete boo
 ### From source
 
 ```bash
-git clone https://codeberg.org/mwtrigg/sdboot-tui
+git clone https://github.com/mwtrigg/sdboot-tui
 cd sdboot-tui
 go build -o sdboot-tui .
 sudo mv sdboot-tui /usr/local/bin/
@@ -60,19 +97,21 @@ sudo sdboot-tui [-esp /path/to/esp]
 
 Default ESP paths checked: `/boot`, `/boot/efi`, `/efi`
 
-The `-esp` flag is useful in chroot environments (e.g. during Arch installation or system recovery):
+### Chroot / recovery environments
+
+The `-esp` flag is useful when the ESP is not at a standard path — for example during Arch Linux installation or system recovery:
 
 ```bash
 sudo sdboot-tui -esp /mnt/boot
 ```
 
-Note: one-shot boot (`o` key) writes to `/sys/firmware/efi/efivars`. From inside a chroot this will only work if `/sys` is bind-mounted into the chroot:
+One-shot boot (`o` key) writes to `/sys/firmware/efi/efivars` on the **running** system. From inside a chroot, this only works if `/sys` is bind-mounted into the chroot first:
 
 ```bash
 mount --rbind /sys /mnt/sys
 ```
 
-Without that, the efivars path will not exist inside the chroot and the one-shot feature will be silently disabled.
+Without that, `efivars` will not be visible inside the chroot and the one-shot feature is silently disabled. Note: `arch-chroot` does this automatically.
 
 ### Keyboard shortcuts
 
@@ -122,7 +161,8 @@ sdboot-tui/
 
 ## Contributing
 
-This is a personal project in active development. Issues and PRs welcome.
+Issues and PRs welcome on [GitHub](https://github.com/mwtrigg/sdboot-tui).
+The authoritative repository is on [Codeberg](https://codeberg.org/mwtrigg/sdboot-tui).
 
 ## License
 
