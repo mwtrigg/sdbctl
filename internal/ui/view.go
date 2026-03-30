@@ -36,6 +36,10 @@ func (m *model) View() string {
 		return m.confirmOverlay()
 	}
 
+	if m.deleting {
+		return m.deleteConfirmOverlay()
+	}
+
 	if m.showPreview {
 		return m.previewOverlay()
 	}
@@ -108,6 +112,29 @@ func (m *model) confirmOverlay() string {
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, modal)
 }
 
+func (m *model) deleteConfirmOverlay() string {
+	name := ""
+	if m.entry != nil {
+		name = m.entry.ID + ".conf"
+	}
+	content := lipgloss.JoinVertical(lipgloss.Top,
+		HelpTitleStyle.Render(" Delete entry? "),
+		"",
+		fmt.Sprintf("  %s", ErrorStyle.Render(name)),
+		"",
+		HelpStyle.Render("  [y] delete   [any other key] cancel"),
+	)
+	modal := HelpModalStyle.Render(content)
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, modal)
+}
+
 func (m *model) previewOverlay() string {
 	title := m.previewTitle
 	content := lipgloss.JoinVertical(lipgloss.Top,
@@ -140,9 +167,11 @@ func (m *model) helpOverlay() string {
 		"",
 		"  Actions",
 		"  ──────────────────────────────────────",
+		"  n             New boot entry",
+		"  D             Delete selected entry",
 		"  e             Toggle edit mode",
 		"  Enter         Save changes (in edit mode)",
-		"  Esc           Cancel editing",
+		"  Esc           Cancel editing / new entry",
 		"  ?             Toggle this help",
 		"  q             Quit",
 		"",
@@ -174,7 +203,7 @@ func (m *model) helpBar() string {
 		if m.editing {
 			return HelpStyle.Render(" ↑/↓: navigate  |  Tab: switch  |  Enter: save  |  Esc: cancel  |  ?: help")
 		}
-		return HelpStyle.Render(" ↑/↓: navigate  |  Tab: switch  |  e: edit  |  q: quit  |  ?: help")
+		return HelpStyle.Render(" ↑/↓: navigate  |  n: new  |  D: delete  |  Tab: switch  |  q: quit  |  ?: help")
 	case paneDetail:
 		if m.editing {
 			return HelpStyle.Render(" ↑/↓: field  |  Tab: next/complete  |  Enter: save  |  Esc: cancel  |  ?: help")

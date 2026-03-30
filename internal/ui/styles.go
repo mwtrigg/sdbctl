@@ -75,6 +75,10 @@ var (
 			Foreground(ColorUKI).
 			Bold(true)
 
+	WarnBadgeStyle = lipgloss.NewStyle().
+			Foreground(ColorAmber).
+			Bold(true)
+
 	DiffOldStyle   = lipgloss.NewStyle().Foreground(ColorError)
 	DiffNewStyle   = lipgloss.NewStyle().Foreground(ColorUKI).Bold(true)
 	DiffArrowStyle = lipgloss.NewStyle().Foreground(ColorMeta)

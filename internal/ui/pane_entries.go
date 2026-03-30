@@ -20,6 +20,8 @@ func (m *model) entriesPane(width int) string {
 		badge := ""
 		if entry.IsUKI {
 			badge = UKIBadgeStyle.Render("[UKI] ")
+		} else if len(m.entryWarnings[entry.ID]) > 0 {
+			badge = WarnBadgeStyle.Render("[!] ")
 		}
 
 		style := ItemStyle.Width(width)

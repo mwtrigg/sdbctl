@@ -54,6 +54,9 @@ type model struct {
 	// save confirmation
 	confirming  bool
 	confirmDiff []diffLine
+	// new / delete state
+	creating bool
+	deleting bool
 	// file preview overlay
 	showPreview    bool
 	previewTitle   string
@@ -61,6 +64,8 @@ type model struct {
 	// cached file metadata
 	entryModTime  string
 	loaderModTime string
+	// per-entry ESP validation issues (entry ID → issues list)
+	entryWarnings map[string][]string
 }
 
 type Option func(*model)
@@ -135,6 +140,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.refreshEntryMeta()
 		m.refreshLoaderMeta()
+		m.revalidateEntries()
 		// Kick off async ESP path crawl for tab completion.
 		return m, crawlESP(msg.espPath)
 
@@ -181,6 +187,17 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Delete confirmation: y to confirm, anything else cancels.
+	if m.deleting {
+		switch msg.String() {
+		case "y", "Y":
+			m.confirmDelete()
+		default:
+			m.deleting = false
+		}
+		return m, nil
+	}
+
 	if m.editing {
 		return m.handleEditKey(msg)
 	}
@@ -208,6 +225,14 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.selected++
 				m.entry = m.entries[m.selected]
 				m.refreshEntryMeta()
+			}
+		case "n":
+			if m.focused == paneEntries {
+				return m, m.enterNewEntryMode()
+			}
+		case "D":
+			if m.focused == paneEntries && m.entry != nil && !m.entry.IsUKI {
+				m.deleting = true
 			}
 		case "e":
 			if m.focused == paneDetail && m.entry != nil && !m.entry.IsUKI {
@@ -320,6 +345,19 @@ func (m *model) refreshLoaderMeta() {
 	}
 }
 
+func (m *model) revalidateEntries() {
+	warnings := make(map[string][]string)
+	for _, e := range m.entries {
+		if e.IsUKI {
+			continue
+		}
+		if verr := boot.ValidateEntry(e, m.espPath); verr != nil {
+			warnings[e.ID] = verr.Issues
+		}
+	}
+	m.entryWarnings = warnings
+}
+
 func (m *model) saveEntry() {
 	if m.entry == nil {
 		return
@@ -327,7 +365,9 @@ func (m *model) saveEntry() {
 	path := filepath.Join(m.espPath, "loader", "entries", m.entry.ID+".conf")
 	if err := m.entry.Write(path); err != nil {
 		m.err = err
+		return
 	}
+	m.revalidateEntries()
 }
 
 func (m *model) saveLoaderConf() {

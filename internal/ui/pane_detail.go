@@ -154,6 +154,13 @@ func (m *model) detailPane(leftColWidth int) string {
 				}
 			}
 
+			if warns := m.entryWarnings[m.entry.ID]; len(warns) > 0 {
+				content.WriteString("\n")
+				for _, w := range warns {
+					content.WriteString(" " + WarnBadgeStyle.Render("! ") + ErrorStyle.Render(w) + "\n")
+				}
+			}
+
 			if m.entryModTime != "" {
 				content.WriteString("\n")
 				content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("modified:"), HelpStyle.Render(m.entryModTime)))
