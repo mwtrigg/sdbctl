@@ -66,6 +66,9 @@ type model struct {
 	loaderModTime string
 	// per-entry ESP validation issues (entry ID → issues list)
 	entryWarnings map[string][]string
+	// one-shot boot state
+	oneShotEntry  string // entry ID currently set for one-shot, or ""
+	oneShotAvail  bool   // whether EFI variable interface is accessible
 }
 
 type Option func(*model)
@@ -141,6 +144,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshEntryMeta()
 		m.refreshLoaderMeta()
 		m.revalidateEntries()
+		m.oneShotAvail = boot.OneShotAvailable()
+		if m.oneShotAvail {
+			if id, err := boot.GetOneShot(); err == nil {
+				m.oneShotEntry = id
+			}
+		}
 		// Kick off async ESP path crawl for tab completion.
 		return m, crawlESP(msg.espPath)
 
@@ -233,6 +242,10 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "D":
 			if m.focused == paneEntries && m.entry != nil && !m.entry.IsUKI {
 				m.deleting = true
+			}
+		case "o":
+			if m.focused == paneEntries && m.entry != nil && !m.entry.IsUKI && m.oneShotAvail {
+				m.toggleOneShot()
 			}
 		case "e":
 			if m.focused == paneDetail && m.entry != nil && !m.entry.IsUKI {
@@ -368,6 +381,26 @@ func (m *model) saveEntry() {
 		return
 	}
 	m.revalidateEntries()
+}
+
+func (m *model) toggleOneShot() {
+	if m.entry == nil {
+		return
+	}
+	if m.oneShotEntry == m.entry.ID {
+		// Already set for this entry — clear it.
+		if err := boot.ClearOneShot(); err != nil {
+			m.err = err
+			return
+		}
+		m.oneShotEntry = ""
+	} else {
+		if err := boot.SetOneShot(m.entry.ID); err != nil {
+			m.err = err
+			return
+		}
+		m.oneShotEntry = m.entry.ID
+	}
 }
 
 func (m *model) saveLoaderConf() {

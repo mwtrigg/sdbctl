@@ -79,6 +79,10 @@ var (
 			Foreground(ColorAmber).
 			Bold(true)
 
+	OneShotBadgeStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#B48EAD")). // Nord aurora purple
+				Bold(true)
+
 	DiffOldStyle   = lipgloss.NewStyle().Foreground(ColorError)
 	DiffNewStyle   = lipgloss.NewStyle().Foreground(ColorUKI).Bold(true)
 	DiffArrowStyle = lipgloss.NewStyle().Foreground(ColorMeta)

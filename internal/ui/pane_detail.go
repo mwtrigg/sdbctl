@@ -154,6 +154,11 @@ func (m *model) detailPane(leftColWidth int) string {
 				}
 			}
 
+			if m.oneShotAvail && m.oneShotEntry == m.entry.ID {
+				content.WriteString("\n")
+				content.WriteString(" " + OneShotBadgeStyle.Render("one-shot: boots once on next restart") + "\n")
+			}
+
 			if warns := m.entryWarnings[m.entry.ID]; len(warns) > 0 {
 				content.WriteString("\n")
 				for _, w := range warns {
