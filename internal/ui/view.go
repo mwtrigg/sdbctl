@@ -211,9 +211,9 @@ func (m *model) helpBar() string {
 			return HelpStyle.Render(" ↑/↓: navigate  |  Tab: switch  |  Enter: save  |  Esc: cancel  |  ?: help")
 		}
 		if m.oneShotAvail {
-			return HelpStyle.Render(" ↑/↓: navigate  |  n: new  |  D: delete  |  s: set default  |  o: one-shot  |  Tab: switch  |  q: quit  |  ?: help")
+			return HelpStyle.Render(" ↑/↓: navigate  |  n: new  |  D: delete  |  s: set default  |  o: one-shot  |  r: res preview  |  Tab: switch  |  q: quit  |  ?: help")
 		}
-		return HelpStyle.Render(" ↑/↓: navigate  |  n: new  |  D: delete  |  s: set default  |  Tab: switch  |  q: quit  |  ?: help")
+		return HelpStyle.Render(" ↑/↓: navigate  |  n: new  |  D: delete  |  s: set default  |  r: res preview  |  Tab: switch  |  q: quit  |  ?: help")
 	case paneDetail:
 		if m.editing {
 			return HelpStyle.Render(" ↑/↓: field  |  Tab: next/complete  |  Enter: save  |  Esc: cancel  |  ?: help")
@@ -221,7 +221,7 @@ func (m *model) helpBar() string {
 		if m.entry != nil && m.entry.IsUKI {
 			return HelpStyle.Render(" p: preview file  |  Tab: switch  |  q: quit  |  ?: help")
 		}
-		return HelpStyle.Render(" e: edit  |  p: preview file  |  Tab: switch  |  q: quit  |  ?: help")
+		return HelpStyle.Render(" e: edit  |  p: preview file  |  r: res preview  |  Tab: switch  |  q: quit  |  ?: help")
 	case paneLoader:
 		if m.editing {
 			return HelpStyle.Render(" e: stop  |  Tab: switch  |  Enter: save  |  Esc: cancel  |  ?: help")

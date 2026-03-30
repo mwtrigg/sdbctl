@@ -270,10 +270,8 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.enterLoaderEditMode()
 			}
 		case "r":
-			if m.focused == paneLoader {
-				m.showResPreview = true
-				m.resPreviewIdx = m.currentConsoleModeIdx()
-			}
+			m.showResPreview = true
+			m.resPreviewIdx = m.currentConsoleModeIdx()
 		case "p":
 			if m.focused == paneDetail && m.entry != nil && !m.entry.IsUKI {
 				m.loadEntryPreview()
