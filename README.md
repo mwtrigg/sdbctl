@@ -33,9 +33,6 @@ Before using, understand the following risks:
 <!-- screenshot: save confirmation diff — changes shown before writing to disk -->
 *Save confirmation with diff view*
 
-<!-- screenshot: console-mode resolution preview — mock boot screen at 80×25 -->
-*Console-mode resolution preview*
-
 <!-- screenshot: ESP validation warning — [!] badge and missing-file errors -->
 *ESP validation warnings*
 
@@ -53,7 +50,6 @@ Before using, understand the following risks:
 - Per-field validation: path format, illegal characters, constrained values (architecture, console-mode, log-level, etc.)
 - ESP file-existence validation — entries with missing kernel or initrd files are flagged with a `[!]` badge
 - One-shot boot override: press `o` to set `LoaderEntryOneShot` for the selected entry (boots it once on next restart, then clears automatically). Shows a `[1x]` badge. EFI systems only.
-- Console-mode resolution preview: press `r` from the loader pane to see a mock systemd-boot screen at each EFI text mode (80×25, 80×50, highest, auto, max, keep), cycling with arrow keys
 - Inline editing with field-by-field navigation
 - Tab completion for ESP filesystem paths (linux, initrd, devicetree fields)
 - Context-sensitive help for each editable field
@@ -130,7 +126,6 @@ Without that, `efivars` will not be visible inside the chroot and the one-shot f
 | `Enter` | Save changes (in edit mode) |
 | `Escape` | Cancel editing / discard new entry |
 | `p` | Preview raw file (entries or loader.conf) |
-| `r` | Console-mode resolution preview (loader pane) |
 | `?` | Toggle help overlay |
 | `q`/`Ctrl+C` | Quit |
 
