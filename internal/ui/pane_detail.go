@@ -25,7 +25,11 @@ func (m *model) detailPane(leftColWidth int) string {
 	var content strings.Builder
 
 	if isEditing && m.draftEntry != nil {
-		content.WriteString(fmt.Sprintf(" ID: %s\n\n", m.draftEntry.ID))
+		draftFilename := m.draftEntry.ID
+		if !m.creating && draftFilename != "" {
+			draftFilename += ".conf"
+		}
+		content.WriteString(fmt.Sprintf(" file: %s\n\n", draftFilename))
 
 		if len(m.editFields) == 0 {
 			content.WriteString(FieldHelpStyle.Render(" No editable fields — implement buildEntryFields() in edit.go") + "\n")
@@ -95,6 +99,9 @@ func (m *model) detailPane(leftColWidth int) string {
 					if f.isPath {
 						content.WriteString(" " + FieldHelpStyle.Render("Tab: path completion") + "\n")
 					}
+					if strings.HasPrefix(f.label, "initrd") || strings.HasPrefix(f.label, "devicetree-overlay") {
+						content.WriteString(" " + FieldHelpStyle.Render("Ctrl+N: add another line") + "\n")
+					}
 					if f.required {
 						content.WriteString(" " + RequiredStyle.Render("* required field") + "\n")
 					}
@@ -106,14 +113,14 @@ func (m *model) detailPane(leftColWidth int) string {
 		if m.entry == nil {
 			content.WriteString(" Select an entry from the list\n")
 		} else if m.entry.IsUKI {
-			content.WriteString(fmt.Sprintf(" ID: %s\n\n", m.entry.ID))
+			content.WriteString(fmt.Sprintf(" file: %s\n\n", m.entry.ID+".efi"))
 			content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("type:"), UKIBadgeStyle.Render("Unified Kernel Image")))
 			content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("efi:"), ValueStyle.Render(m.entry.EFIPath)))
 			content.WriteString("\n")
 			content.WriteString(" " + HelpStyle.Render("Kernel, initrd, and cmdline are") + "\n")
 			content.WriteString(" " + HelpStyle.Render("embedded in the EFI binary.") + "\n")
 		} else {
-			content.WriteString(fmt.Sprintf(" ID: %s\n\n", m.entry.ID))
+			content.WriteString(fmt.Sprintf(" file: %s\n\n", m.entry.ID+".conf"))
 
 			fields := []struct {
 				key   string
@@ -144,6 +151,25 @@ func (m *model) detailPane(leftColWidth int) string {
 				content.WriteString("\n")
 				for _, opt := range m.entry.Options {
 					content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("options:"), ValueStyle.Render(opt)))
+				}
+			}
+
+			if len(m.entry.DTOOverlays) > 0 {
+				content.WriteString("\n")
+				for _, dto := range m.entry.DTOOverlays {
+					content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("devicetree-overlay:"), ValueStyle.Render(dto)))
+				}
+			}
+
+			if m.oneShotAvail && m.oneShotEntry == m.entry.ID {
+				content.WriteString("\n")
+				content.WriteString(" " + OneShotBadgeStyle.Render("one-shot: boots once on next restart") + "\n")
+			}
+
+			if warns := m.entryWarnings[m.entry.ID]; len(warns) > 0 {
+				content.WriteString("\n")
+				for _, w := range warns {
+					content.WriteString(" " + WarnBadgeStyle.Render("! ") + ErrorStyle.Render(w) + "\n")
 				}
 			}
 

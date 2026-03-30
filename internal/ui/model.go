@@ -19,15 +19,7 @@ const (
 	paneLoader
 )
 
-type viewMode int
-
-const (
-	_ viewMode = iota
-	viewMain
-)
-
 type model struct {
-	view       viewMode
 	focused    pane
 	espPath    string
 	entries    []*boot.BootEntry
@@ -54,6 +46,9 @@ type model struct {
 	// save confirmation
 	confirming  bool
 	confirmDiff []diffLine
+	// new / delete state
+	creating bool
+	deleting bool
 	// file preview overlay
 	showPreview    bool
 	previewTitle   string
@@ -61,6 +56,14 @@ type model struct {
 	// cached file metadata
 	entryModTime  string
 	loaderModTime string
+	// per-entry ESP validation issues (entry ID → issues list)
+	entryWarnings map[string][]string
+	// one-shot boot state
+	oneShotEntry  string // entry ID currently set for one-shot, or ""
+	oneShotAvail  bool   // whether EFI variable interface is accessible
+	// console-mode resolution preview
+	showResPreview  bool
+	resPreviewIdx   int // index into consoleModes slice
 }
 
 type Option func(*model)
@@ -135,6 +138,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.refreshEntryMeta()
 		m.refreshLoaderMeta()
+		m.revalidateEntries()
+		m.oneShotAvail = boot.OneShotAvailable()
+		if m.oneShotAvail {
+			if id, err := boot.GetOneShot(); err == nil {
+				m.oneShotEntry = id
+			}
+		}
 		// Kick off async ESP path crawl for tab completion.
 		return m, crawlESP(msg.espPath)
 
@@ -164,6 +174,23 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Console-mode resolution preview: arrows cycle, anything else closes.
+	if m.showResPreview {
+		switch msg.Type {
+		case tea.KeyLeft, tea.KeyUp:
+			if m.resPreviewIdx > 0 {
+				m.resPreviewIdx--
+			}
+		case tea.KeyRight, tea.KeyDown:
+			if m.resPreviewIdx < len(consoleModes)-1 {
+				m.resPreviewIdx++
+			}
+		default:
+			m.showResPreview = false
+		}
+		return m, nil
+	}
+
 	// Close preview overlay on any key.
 	if m.showPreview {
 		m.showPreview = false
@@ -177,6 +204,17 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.finalizeCommit()
 		default:
 			m.confirming = false // back to editing
+		}
+		return m, nil
+	}
+
+	// Delete confirmation: y to confirm, anything else cancels.
+	if m.deleting {
+		switch msg.String() {
+		case "y", "Y":
+			m.confirmDelete()
+		default:
+			m.deleting = false
 		}
 		return m, nil
 	}
@@ -209,11 +247,32 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.entry = m.entries[m.selected]
 				m.refreshEntryMeta()
 			}
+		case "n":
+			if m.focused == paneEntries {
+				return m, m.enterNewEntryMode()
+			}
+		case "D":
+			if m.focused == paneEntries && m.entry != nil && !m.entry.IsUKI {
+				m.deleting = true
+			}
+		case "o":
+			if m.focused == paneEntries && m.entry != nil && !m.entry.IsUKI && m.oneShotAvail {
+				m.toggleOneShot()
+			}
+		case "s":
+			if m.focused == paneEntries && m.entry != nil && m.loaderConf != nil {
+				m.setDefaultEntry()
+			}
 		case "e":
 			if m.focused == paneDetail && m.entry != nil && !m.entry.IsUKI {
 				return m, m.enterEntryEditMode()
 			} else if m.focused == paneLoader {
 				return m, m.enterLoaderEditMode()
+			}
+		case "r":
+			if m.focused == paneLoader {
+				m.showResPreview = true
+				m.resPreviewIdx = m.currentConsoleModeIdx()
 			}
 		case "p":
 			if m.focused == paneDetail && m.entry != nil && !m.entry.IsUKI {
@@ -320,6 +379,19 @@ func (m *model) refreshLoaderMeta() {
 	}
 }
 
+func (m *model) revalidateEntries() {
+	warnings := make(map[string][]string)
+	for _, e := range m.entries {
+		if e.IsUKI {
+			continue
+		}
+		if verr := boot.ValidateEntry(e, m.espPath); verr != nil {
+			warnings[e.ID] = verr.Issues
+		}
+	}
+	m.entryWarnings = warnings
+}
+
 func (m *model) saveEntry() {
 	if m.entry == nil {
 		return
@@ -327,6 +399,64 @@ func (m *model) saveEntry() {
 	path := filepath.Join(m.espPath, "loader", "entries", m.entry.ID+".conf")
 	if err := m.entry.Write(path); err != nil {
 		m.err = err
+		return
+	}
+	m.revalidateEntries()
+}
+
+// isDefaultEntry reports whether entryID matches the loader.conf default token.
+func (m *model) currentConsoleModeIdx() int {
+	if m.loaderConf == nil {
+		return 0
+	}
+	for i, cm := range consoleModes {
+		if cm.token == m.loaderConf.ConsoleMode {
+			return i
+		}
+	}
+	return 0
+}
+
+func (m *model) isDefaultEntry(id string) bool {
+	if m.loaderConf == nil || m.loaderConf.Default == "" {
+		return false
+	}
+	d := m.loaderConf.Default
+	return d == id || d == id+".conf"
+}
+
+func (m *model) setDefaultEntry() {
+	if m.entry == nil || m.loaderConf == nil {
+		return
+	}
+	// For UKIs the token is just the ID; for .conf entries systemd-boot
+	// matches on filename glob, so "id.conf" is the canonical value.
+	token := m.entry.ID
+	if !m.entry.IsUKI {
+		token = m.entry.ID + ".conf"
+	}
+	m.loaderConf.Default = token
+	m.saveLoaderConf()
+	m.refreshLoaderMeta()
+}
+
+func (m *model) toggleOneShot() {
+	if m.entry == nil {
+		return
+	}
+	if m.oneShotEntry == m.entry.ID {
+		// Already set for this entry — clear it.
+		if err := boot.ClearOneShot(); err != nil {
+			m.err = err
+			return
+		}
+		m.oneShotEntry = ""
+	} else {
+		if err := boot.SetOneShot(m.entry.ID); err != nil {
+			m.err = err
+			return
+		}
+		m.oneShotEntry = m.entry.ID
 	}
 }
 

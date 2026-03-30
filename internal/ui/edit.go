@@ -3,21 +3,24 @@ package ui
 import (
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mwtrigg/sdboot-tui/internal/boot"
 )
 
 // fieldDesc describes one editable field in a boot entry or loader config.
 type fieldDesc struct {
-	label    string      // key name shown in the UI
-	get      func() string  // reads current draft value
-	set      func(string)   // writes value back to draft
-	isPath   bool           // enables ESP tab completion on Tab key
-	required bool           // blocks save if empty
-	help     string         // context help shown at the bottom of the pane
+	label    string        // key name shown in the UI
+	get      func() string // reads current draft value
+	set      func(string)  // writes value back to draft
+	isPath   bool          // enables ESP tab completion on Tab key
+	required bool          // blocks save if empty
+	validate func(string) string // returns error message, or "" if valid
+	help     string        // context help shown at the bottom of the pane
 }
 
 // espPathsLoaded carries the result of the async ESP filesystem crawl.
@@ -56,6 +59,43 @@ func (m *model) enterEntryEditMode() tea.Cmd {
 	return m.resetEditInput()
 }
 
+// enterNewEntryMode creates a blank boot entry, appends it to m.entries, selects
+// it, and enters edit mode so the user can fill in all fields including the ID.
+func (m *model) enterNewEntryMode() tea.Cmd {
+	newEntry := &boot.BootEntry{}
+	m.entries = append(m.entries, newEntry)
+	m.selected = len(m.entries) - 1
+	m.entry = newEntry
+	m.draftEntry = newEntry
+	m.focused = paneDetail
+	m.creating = true
+	m.buildEntryFields()
+	return m.resetEditInput()
+}
+
+// confirmDelete removes the selected entry's .conf file and updates the slice.
+func (m *model) confirmDelete() {
+	if m.entry == nil || m.entry.IsUKI {
+		return
+	}
+	path := filepath.Join(m.espPath, "loader", "entries", m.entry.ID+".conf")
+	if err := os.Remove(path); err != nil {
+		m.err = err
+		return
+	}
+	m.entries = append(m.entries[:m.selected], m.entries[m.selected+1:]...)
+	if len(m.entries) == 0 {
+		m.selected = 0
+		m.entry = nil
+	} else {
+		if m.selected >= len(m.entries) {
+			m.selected = len(m.entries) - 1
+		}
+		m.entry = m.entries[m.selected]
+	}
+	m.refreshEntryMeta()
+}
+
 // enterLoaderEditMode begins editing the loader configuration.
 func (m *model) enterLoaderEditMode() tea.Cmd {
 	if m.loaderConf == nil {
@@ -83,25 +123,41 @@ func (m *model) resetEditInput() tea.Cmd {
 func (m *model) buildEntryFields() {
 	e := m.draftEntry
 
-	fields := []fieldDesc{
+	var fields []fieldDesc
+
+	if m.creating {
+		fields = append(fields, fieldDesc{
+			label:    "id",
+			get:      func() string { return e.ID },
+			set:      func(v string) { e.ID = strings.TrimSpace(v) },
+			required: true,
+			validate: validateEntryID,
+			help:     "Filename for this entry without the .conf extension (e.g. arch-linux). No spaces or path separators.",
+		})
+	}
+
+	fields = append(fields, []fieldDesc{
 		{
 			label:    "title",
 			get:      func() string { return e.Title },
 			set:      func(v string) { e.Title = strings.TrimSpace(v) },
 			required: true,
+			validate: validateNoNewlines,
 			help:     "Human-readable name shown in the boot menu.",
 		},
 		{
-			label: "version",
-			get:   func() string { return e.Version },
-			set:   func(v string) { e.Version = strings.TrimSpace(v) },
-			help:  "Version string for display and entry sorting.",
+			label:    "version",
+			get:      func() string { return e.Version },
+			set:      func(v string) { e.Version = strings.TrimSpace(v) },
+			validate: validateNoNewlines,
+			help:     "Version string for display and entry sorting.",
 		},
 		{
-			label: "sort-key",
-			get:   func() string { return e.SortKey },
-			set:   func(v string) { e.SortKey = strings.TrimSpace(v) },
-			help:  "Key used to order entries in the menu. Entries with the same sort-key are grouped.",
+			label:    "sort-key",
+			get:      func() string { return e.SortKey },
+			set:      func(v string) { e.SortKey = strings.TrimSpace(v) },
+			validate: validateNoNewlines,
+			help:     "Key used to order entries in the menu. Entries with the same sort-key are grouped.",
 		},
 		{
 			label:    "linux",
@@ -109,9 +165,10 @@ func (m *model) buildEntryFields() {
 			set:      func(v string) { e.Linux = strings.TrimSpace(v) },
 			isPath:   true,
 			required: true,
+			validate: validateESPPath,
 			help:     "Kernel image path relative to ESP root (e.g. /vmlinuz-linux). Tab for completion.",
 		},
-	}
+	}...)
 
 	// One field per initrd entry.
 	for i := range e.Initrds {
@@ -121,11 +178,12 @@ func (m *model) buildEntryFields() {
 			label = fmt.Sprintf("initrd[%d]", idx)
 		}
 		fields = append(fields, fieldDesc{
-			label:  label,
-			get:    func() string { return e.Initrds[idx] },
-			set:    func(v string) { e.Initrds[idx] = strings.TrimSpace(v) },
-			isPath: true,
-			help:   "Initial RAM disk path relative to ESP root. Tab for completion.",
+			label:    label,
+			get:      func() string { return e.Initrds[idx] },
+			set:      func(v string) { e.Initrds[idx] = strings.TrimSpace(v) },
+			isPath:   true,
+			validate: validateESPPath,
+			help:     "Initial RAM disk path relative to ESP root. Tab for completion.",
 		})
 	}
 
@@ -145,13 +203,41 @@ func (m *model) buildEntryFields() {
 	}
 
 	// Devicetree (if set).
-	if e.Devicetree != "" {
+	fields = append(fields, fieldDesc{
+		label:    "machine-id",
+		get:      func() string { return e.MachineID },
+		set:      func(v string) { e.MachineID = strings.TrimSpace(v) },
+		validate: validateMachineID,
+		help:     "32-character lowercase hex machine identifier. Leave empty to omit.",
+	})
+
+	fields = append(fields, fieldDesc{
+		label:    "architecture",
+		get:      func() string { return e.Architecture },
+		set:      func(v string) { e.Architecture = strings.TrimSpace(v) },
+		validate: validateArchitecture,
+		help:     "Override boot architecture: x64, aa64, ia32, riscv64, loongarch64. Usually omitted.",
+	})
+
+	fields = append(fields, fieldDesc{
+		label:    "devicetree",
+		get:      func() string { return e.Devicetree },
+		set:      func(v string) { e.Devicetree = strings.TrimSpace(v) },
+		isPath:   true,
+		validate: validateESPPath,
+		help:     "Device tree blob path relative to ESP root. ARM/RISC-V systems only.",
+	})
+
+	for i := range e.DTOOverlays {
+		idx := i
+		label := fmt.Sprintf("devicetree-overlay[%d]", idx)
 		fields = append(fields, fieldDesc{
-			label:  "devicetree",
-			get:    func() string { return e.Devicetree },
-			set:    func(v string) { e.Devicetree = strings.TrimSpace(v) },
-			isPath: true,
-			help:   "Device tree blob path relative to ESP root. ARM/RISC-V systems only.",
+			label:    label,
+			get:      func() string { return e.DTOOverlays[idx] },
+			set:      func(v string) { e.DTOOverlays[idx] = strings.TrimSpace(v) },
+			isPath:   true,
+			validate: validateESPPath,
+			help:     "Device tree overlay path relative to ESP root.",
 		})
 	}
 
@@ -185,43 +271,77 @@ func (m *model) buildLoaderFields() {
 			label:    "timeout",
 			get:      func() string { return lc.Timeout },
 			set:      func(v string) { lc.Timeout = strings.TrimSpace(v) },
-			required: false,
+			validate: validateTimeout,
 			help:     "Seconds before auto-boot. 0=immediate. 'menu-force'=always show menu. 'menu-hidden'=no countdown.",
 		},
 		{
-			label:    "default",
-			get:      func() string { return lc.Default },
-			set:      func(v string) { lc.Default = strings.TrimSpace(v) },
-			required: false,
-			help:     "Default entry filename or glob (e.g. 'arch.conf'). '@saved' uses last-booted entry.",
+			label: "default",
+			get:   func() string { return lc.Default },
+			set:   func(v string) { lc.Default = strings.TrimSpace(v) },
+			help:  "Default entry filename or glob (e.g. 'arch.conf'). '@saved' uses last-booted entry.",
 		},
 		{
 			label:    "editor",
 			get:      boolGet(lc.Editor),
 			set:      boolSet(&lc.Editor),
-			required: false,
+			validate: validateBoolField,
 			help:     "Allow kernel cmdline editing at boot prompt (yes/no). Disable on shared/secure systems.",
 		},
 		{
 			label:    "console-mode",
 			get:      func() string { return lc.ConsoleMode },
 			set:      func(v string) { lc.ConsoleMode = strings.TrimSpace(v) },
-			required: false,
+			validate: validateConsoleMode,
 			help:     "EFI console resolution: 0=80x25, 1=80x50, 2=highest, auto, max, or keep.",
 		},
 		{
 			label:    "auto-entries",
 			get:      boolGet(lc.AutoEntries),
 			set:      boolSet(&lc.AutoEntries),
-			required: false,
+			validate: validateBoolField,
 			help:     "Auto-add entries for other EFI bootloaders found on the ESP (yes/no).",
 		},
 		{
 			label:    "auto-firmware",
 			get:      boolGet(lc.AutoFirmware),
 			set:      boolSet(&lc.AutoFirmware),
-			required: false,
+			validate: validateBoolField,
 			help:     "Show 'Reboot into firmware interface' option in the menu (yes/no).",
+		},
+		{
+			label:    "auto-reboot",
+			get:      boolGet(lc.AutoReboot),
+			set:      boolSet(&lc.AutoReboot),
+			validate: validateBoolField,
+			help:     "Automatically reboot after menu timeout with no input (yes/no).",
+		},
+		{
+			label:    "auto-poweroff",
+			get:      boolGet(lc.AutoPowerOff),
+			set:      boolSet(&lc.AutoPowerOff),
+			validate: validateBoolField,
+			help:     "Automatically power off after menu timeout with no input (yes/no).",
+		},
+		{
+			label:    "beep",
+			get:      boolGet(lc.Beep),
+			set:      boolSet(&lc.Beep),
+			validate: validateBoolField,
+			help:     "Beep on boot menu navigation (yes/no). Requires a PC speaker.",
+		},
+		{
+			label:    "reboot-on-error",
+			get:      func() string { return lc.RebootOnError },
+			set:      func(v string) { lc.RebootOnError = strings.TrimSpace(v) },
+			validate: validateRebootOnError,
+			help:     "Action on boot failure: yes (reboot), no (halt), auto (firmware default).",
+		},
+		{
+			label:    "log-level",
+			get:      func() string { return lc.LogLevel },
+			set:      func(v string) { lc.LogLevel = strings.TrimSpace(v) },
+			validate: validateLogLevelField,
+			help:     "Logging verbosity: emerg, alert, crit, err, warning, notice, info, or debug.",
 		},
 	}
 }
@@ -270,11 +390,18 @@ type diffLine struct {
 func (m *model) prepareCommit() {
 	m.saveInputToField()
 
-	// Validate required fields.
+	// Validate all fields: required check, then per-field validator.
 	for _, f := range m.editFields {
-		if f.required && strings.TrimSpace(f.get()) == "" {
+		v := f.get()
+		if f.required && strings.TrimSpace(v) == "" {
 			m.validationErr = f.label + " is required"
 			return
+		}
+		if f.validate != nil {
+			if msg := f.validate(v); msg != "" {
+				m.validationErr = f.label + ": " + msg
+				return
+			}
 		}
 	}
 	m.validationErr = ""
@@ -295,8 +422,16 @@ func (m *model) finalizeCommit() {
 	if m.focused == paneDetail {
 		m.entry = m.draftEntry
 		m.entries[m.selected] = m.draftEntry // keep slice in sync
+		if m.creating {
+			path := filepath.Join(m.espPath, "loader", "entries", m.draftEntry.ID+".conf")
+			if err := m.draftEntry.Write(path); err != nil {
+				m.err = err
+			}
+			m.creating = false
+		} else {
+			m.saveEntry()
+		}
 		m.draftEntry = nil
-		m.saveEntry()
 		m.refreshEntryMeta()
 	} else {
 		m.loaderConf = m.draftLoader
@@ -333,7 +468,10 @@ func (m *model) buildDiff() []diffLine {
 		add("linux", e.Linux, d.Linux)
 		add("initrd", strings.Join(e.Initrds, ", "), strings.Join(d.Initrds, ", "))
 		add("options", strings.Join(e.Options, " "), strings.Join(d.Options, " "))
+		add("machine-id", e.MachineID, d.MachineID)
+		add("architecture", e.Architecture, d.Architecture)
 		add("devicetree", e.Devicetree, d.Devicetree)
+		add("devicetree-overlay", strings.Join(e.DTOOverlays, ", "), strings.Join(d.DTOOverlays, ", "))
 	} else if m.focused == paneLoader && m.loaderConf != nil && m.draftLoader != nil {
 		l, d := m.loaderConf, m.draftLoader
 		add("timeout", l.Timeout, d.Timeout)
@@ -342,12 +480,29 @@ func (m *model) buildDiff() []diffLine {
 		add("console-mode", l.ConsoleMode, d.ConsoleMode)
 		add("auto-entries", boolStr(l.AutoEntries), boolStr(d.AutoEntries))
 		add("auto-firmware", boolStr(l.AutoFirmware), boolStr(d.AutoFirmware))
+		add("auto-reboot", boolStr(l.AutoReboot), boolStr(d.AutoReboot))
+		add("auto-poweroff", boolStr(l.AutoPowerOff), boolStr(d.AutoPowerOff))
+		add("beep", boolStr(l.Beep), boolStr(d.Beep))
+		add("reboot-on-error", l.RebootOnError, d.RebootOnError)
+		add("log-level", l.LogLevel, d.LogLevel)
 	}
 
 	return diff
 }
 
 func (m *model) cancelEdit() {
+	if m.creating {
+		// Remove the unsaved placeholder entry.
+		m.entries = m.entries[:len(m.entries)-1]
+		if len(m.entries) > 0 {
+			m.selected = len(m.entries) - 1
+			m.entry = m.entries[m.selected]
+		} else {
+			m.selected = 0
+			m.entry = nil
+		}
+		m.creating = false
+	}
 	m.draftEntry = nil
 	m.draftLoader = nil
 	m.editFields = nil
@@ -386,6 +541,12 @@ func (m *model) handleEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyShiftTab:
 		m.editPrevField()
 		return m, nil
+	case tea.KeyCtrlN:
+		// Append a new line to the initrd or devicetree-overlay list.
+		if m.focused == paneDetail && m.draftEntry != nil {
+			m.appendListField()
+			return m, nil
+		}
 	case tea.KeyRunes:
 		if msg.String() == "?" {
 			m.showHelp = !m.showHelp
@@ -397,6 +558,41 @@ func (m *model) handleEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.editInput, cmd = m.editInput.Update(msg)
 	return m, cmd
+}
+
+// appendListField adds a new blank element to the initrd or devicetree-overlay
+// list, rebuilds the field list, and positions the cursor on the new field.
+// It is a no-op if the active field is not one of those two types.
+func (m *model) appendListField() {
+	if m.editFieldIdx >= len(m.editFields) {
+		return
+	}
+	m.saveInputToField()
+	label := m.editFields[m.editFieldIdx].label
+
+	e := m.draftEntry
+	switch {
+	case strings.HasPrefix(label, "initrd"):
+		e.Initrds = append(e.Initrds, "")
+		m.buildEntryFields()
+		// Position on the newly appended initrd field.
+		for i, f := range m.editFields {
+			if strings.HasPrefix(f.label, "initrd") {
+				m.editFieldIdx = i
+			}
+		}
+	case strings.HasPrefix(label, "devicetree-overlay"):
+		e.DTOOverlays = append(e.DTOOverlays, "")
+		m.buildEntryFields()
+		for i, f := range m.editFields {
+			if strings.HasPrefix(f.label, "devicetree-overlay") {
+				m.editFieldIdx = i
+			}
+		}
+	default:
+		return
+	}
+	m.loadFieldIntoInput()
 }
 
 // tabComplete performs path completion on the current input value.
@@ -455,4 +651,145 @@ func commonPrefix(strs []string) string {
 		}
 	}
 	return prefix
+}
+
+// validateEntryID checks that s is a valid boot entry filename component:
+// no path separators, no spaces, no dots at the start, non-empty after trim.
+func validateEntryID(s string) string {
+	if s == "" {
+		return "" // handled by required check
+	}
+	if strings.ContainsAny(s, "/ \\ \t") {
+		return "must not contain spaces or path separators"
+	}
+	if strings.ContainsAny(s, "\x00") {
+		return "must not contain null bytes"
+	}
+	if strings.HasPrefix(s, ".") {
+		return "must not start with a dot"
+	}
+	return ""
+}
+
+// validateESPPath checks that s is a valid absolute ESP-relative path:
+// must start with /, no spaces, no null bytes, no .. traversal.
+func validateESPPath(s string) string {
+	if s == "" {
+		return "" // handled by required check
+	}
+	if !strings.HasPrefix(s, "/") {
+		return "must be an absolute path starting with /"
+	}
+	if strings.ContainsAny(s, " \t\x00") {
+		return "must not contain spaces or null bytes"
+	}
+	for _, part := range strings.Split(s, "/") {
+		if part == ".." {
+			return "must not contain .. path traversal"
+		}
+	}
+	return ""
+}
+
+// validateNoNewlines rejects values containing newlines or null bytes, used
+// for single-line text fields like title, version, sort-key.
+func validateNoNewlines(s string) string {
+	if strings.ContainsAny(s, "\n\r\x00") {
+		return "must not contain newlines or null bytes"
+	}
+	return ""
+}
+
+// validateTimeout mirrors the loader.conf spec: a non-negative integer, or one
+// of the special tokens menu-force / menu-hidden.
+func validateTimeout(s string) string {
+	if s == "" {
+		return ""
+	}
+	switch s {
+	case "menu-force", "menu-hidden":
+		return ""
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return "must be a number of seconds, \"menu-force\", or \"menu-hidden\""
+		}
+	}
+	return ""
+}
+
+// validateConsoleMode mirrors the loader.conf spec.
+func validateConsoleMode(s string) string {
+	if s == "" {
+		return ""
+	}
+	switch s {
+	case "0", "1", "2", "auto", "max", "keep":
+		return ""
+	}
+	return "must be 0, 1, 2, auto, max, or keep"
+}
+
+// validateBoolField accepts yes/no and common synonyms.
+func validateBoolField(s string) string {
+	if s == "" {
+		return ""
+	}
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "yes", "no", "true", "false", "on", "off", "1", "0", "y", "n":
+		return ""
+	}
+	return "must be yes or no"
+}
+
+// validateMachineID accepts a 32-char lowercase hex string or empty.
+func validateMachineID(s string) string {
+	if s == "" {
+		return ""
+	}
+	if len(s) != 32 {
+		return "must be exactly 32 hex characters"
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return "must be lowercase hex characters only"
+		}
+	}
+	return ""
+}
+
+// validateArchitecture accepts known systemd-boot architecture tokens or empty.
+func validateArchitecture(s string) string {
+	if s == "" {
+		return ""
+	}
+	switch s {
+	case "x64", "aa64", "ia32", "riscv64", "loongarch64":
+		return ""
+	}
+	return "must be one of: x64, aa64, ia32, riscv64, loongarch64"
+}
+
+// validateRebootOnError mirrors the loader.conf reboot-on-error spec.
+func validateRebootOnError(s string) string {
+	if s == "" {
+		return ""
+	}
+	switch s {
+	case "yes", "no", "auto":
+		return ""
+	}
+	return "must be yes, no, or auto"
+}
+
+// validateLogLevelField mirrors the loader.conf log-level spec.
+func validateLogLevelField(s string) string {
+	if s == "" {
+		return ""
+	}
+	switch s {
+	case "emerg", "alert", "crit", "err", "warning", "notice", "info", "debug":
+		return ""
+	}
+	return "must be one of: emerg, alert, crit, err, warning, notice, info, debug"
 }
