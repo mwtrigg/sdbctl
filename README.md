@@ -1,17 +1,23 @@
 # sdboot-tui
 
-A terminal UI for managing systemd-boot — browse, view, and edit boot entries and loader configuration without touching config files directly.
+A terminal UI for managing systemd-boot — browse, create, edit, and delete boot entries and loader configuration without touching config files directly.
 
 ---
 
 ## Features
 
-- Browse all boot entries in `loader/entries/`
-- View and edit entry fields (title, version, linux, initrd, options, etc.)
-- View and edit `loader.conf` settings (timeout, default, editor, console-mode, etc.)
-- Inline editing with field-by-field navigation and required-field validation
+- Browse all boot entries in `loader/entries/` and UKIs in `EFI/Linux/`
+- Create new boot entries with guided field editing
+- Delete existing entries with confirmation
+- View and edit all entry fields: title, version, linux, initrd, options, machine-id, architecture, sort-key, devicetree, devicetree-overlay
+- View and edit all `loader.conf` settings: timeout, default, editor, console-mode, auto-entries, auto-firmware, auto-reboot, auto-poweroff, beep, reboot-on-error, log-level
+- Per-field validation: path format, illegal characters, constrained values (architecture, console-mode, log-level, etc.)
+- ESP file-existence validation — entries with missing kernel or initrd files are flagged with a `[!]` badge
+- One-shot boot override: press `o` to set `LoaderEntryOneShot` for the selected entry (boots it once on next restart, then clears automatically). Shows a `[1x]` badge. EFI systems only.
+- Inline editing with field-by-field navigation
 - Tab completion for ESP filesystem paths (linux, initrd, devicetree fields)
 - Context-sensitive help for each editable field
+- Save confirmation with diff view
 - File preview overlay — view the raw `.conf` file for any entry or `loader.conf`
 - Last-modified timestamp shown for entries and loader config
 - Keyboard navigation with arrow keys or `j`/`k`
@@ -20,17 +26,17 @@ A terminal UI for managing systemd-boot — browse, view, and edit boot entries 
 
 ## Not yet implemented
 
-- Set the default boot entry interactively
-- Validate that referenced kernels and initrds exist on the ESP
-- One-shot boot override (`LoaderEntryOneShot`)
-- EFI variable inspection
-- Anything involving `efibootmgr`
+- Set the default boot entry interactively (workaround: edit the `default` field in the loader pane)
+- EFI variable inspection beyond one-shot
+- Anything involving `efibootmgr` (boot order, EFI boot entries)
+- Adding new initrd or devicetree-overlay lines to an existing entry (existing lines are editable)
 
 ## Requirements
 
 - Linux with systemd-boot installed
 - ESP mounted at `/boot`, `/boot/efi`, or `/efi` (standard locations)
 - Root or appropriate group membership to write to the ESP
+- For one-shot boot: EFI system with `/sys/firmware/efi/efivars` accessible
 
 ## Installation
 
@@ -59,11 +65,14 @@ Default ESP paths checked: `/boot`, `/boot/efi`, `/efi`
 |-----|--------|
 | `↑`/`↓` or `j`/`k` | Navigate entry list |
 | `Tab`/`Shift+Tab` | Switch panes |
+| `n` | New boot entry |
+| `D` | Delete selected entry |
+| `o` | Toggle one-shot boot (EFI only) |
 | `e` | Enter edit mode |
 | `↑`/`↓` | Navigate fields (in edit mode) |
 | `Tab` | Next field / path completion (in edit mode) |
 | `Enter` | Save changes (in edit mode) |
-| `Escape` | Cancel editing |
+| `Escape` | Cancel editing / discard new entry |
 | `p` | Preview raw file (entries or loader.conf) |
 | `?` | Toggle help overlay |
 | `q`/`Ctrl+C` | Quit |
@@ -74,11 +83,11 @@ Default ESP paths checked: `/boot`, `/boot/efi`, `/efi`
 sdboot-tui/
 ├── main.go
 ├── internal/
-│   ├── boot/               # ESP discovery, entry and loader.conf parsing, validation
+│   ├── boot/               # ESP discovery, entry and loader.conf parsing, validation, EFI variables
 │   └── ui/                 # Bubble Tea TUI
 │       ├── model.go        # Model, Update, key handling
 │       ├── view.go         # Layout, overlays, header, help bar
-│       ├── edit.go         # Inline editing, tab completion, field definitions
+│       ├── edit.go         # Inline editing, tab completion, field definitions, validators
 │       ├── pane_entries.go # Boot entries list pane
 │       ├── pane_detail.go  # Entry details / edit pane
 │       ├── pane_loader.go  # loader.conf view / edit pane
@@ -95,7 +104,7 @@ sdboot-tui/
 
 ## Contributing
 
-This is a personal project in early development. Issues and PRs welcome.
+This is a personal project in active development. Issues and PRs welcome.
 
 ## License
 
