@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -25,11 +26,8 @@ func (m *model) detailPane(leftColWidth int) string {
 	var content strings.Builder
 
 	if isEditing && m.draftEntry != nil {
-		draftFilename := m.draftEntry.ID
-		if !m.creating && draftFilename != "" {
-			draftFilename += ".conf"
-		}
-		content.WriteString(fmt.Sprintf(" file: %s\n\n", draftFilename))
+		draftPath := filepath.Join(m.espPath, "loader", "entries", m.draftEntry.ID+".conf")
+		content.WriteString(fmt.Sprintf(" %s %s\n\n", KeyStyle.Render("file:"), HelpStyle.Render(draftPath)))
 
 		if len(m.editFields) == 0 {
 			content.WriteString(FieldHelpStyle.Render(" No editable fields — implement buildEntryFields() in edit.go") + "\n")
@@ -113,14 +111,16 @@ func (m *model) detailPane(leftColWidth int) string {
 		if m.entry == nil {
 			content.WriteString(" Select an entry from the list\n")
 		} else if m.entry.IsUKI {
-			content.WriteString(fmt.Sprintf(" file: %s\n\n", m.entry.ID+".efi"))
+			ukiPath := filepath.Join(m.espPath, "EFI", "Linux", m.entry.ID+".efi")
+			content.WriteString(fmt.Sprintf(" %s %s\n\n", KeyStyle.Render("file:"), HelpStyle.Render(ukiPath)))
 			content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("type:"), UKIBadgeStyle.Render("Unified Kernel Image")))
 			content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("efi:"), ValueStyle.Render(m.entry.EFIPath)))
 			content.WriteString("\n")
 			content.WriteString(" " + HelpStyle.Render("Kernel, initrd, and cmdline are") + "\n")
 			content.WriteString(" " + HelpStyle.Render("embedded in the EFI binary.") + "\n")
 		} else {
-			content.WriteString(fmt.Sprintf(" file: %s\n\n", m.entry.ID+".conf"))
+			confPath := filepath.Join(m.espPath, "loader", "entries", m.entry.ID+".conf")
+			content.WriteString(fmt.Sprintf(" %s %s\n\n", KeyStyle.Render("file:"), HelpStyle.Render(confPath)))
 
 			fields := []struct {
 				key   string

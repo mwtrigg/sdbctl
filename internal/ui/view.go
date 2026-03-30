@@ -10,7 +10,11 @@ import (
 func (m *model) View() string {
 	if m.err != nil {
 		errText := ErrorStyle.Render(fmt.Sprintf(" Error: %s", m.err.Error()))
-		return OuterFrame.Render(lipgloss.JoinVertical(lipgloss.Top,
+		w := m.width - 2
+		if w < 20 {
+			w = 20
+		}
+		return OuterFrame.Width(w).Render(lipgloss.JoinVertical(lipgloss.Top,
 			m.header(),
 			"\n",
 			errText,
@@ -25,7 +29,11 @@ func (m *model) View() string {
 			m.spinner.View(),
 			"  Discovering boot entries...",
 		)
-		return OuterFrame.Render(lipgloss.JoinVertical(lipgloss.Top,
+		lw := m.width - 2
+		if lw < 20 {
+			lw = 20
+		}
+		return OuterFrame.Width(lw).Render(lipgloss.JoinVertical(lipgloss.Top,
 			m.header(),
 			"\n",
 			PaneContentStyle.Render(loadingText),
@@ -38,10 +46,6 @@ func (m *model) View() string {
 
 	if m.deleting {
 		return m.deleteConfirmOverlay()
-	}
-
-	if m.showResPreview {
-		return m.resolutionPreviewOverlay()
 	}
 
 	if m.showPreview {
@@ -70,7 +74,11 @@ func (m *model) View() string {
 		m.helpBar(),
 	)
 
-	return OuterFrame.Render(appContent)
+	fw := m.width - 2
+	if fw < 20 {
+		fw = 20
+	}
+	return OuterFrame.Width(fw).Render(appContent)
 }
 
 func (m *model) leftPaneWidth() int {
@@ -175,7 +183,6 @@ func (m *model) helpOverlay() string {
 		"  D             Delete selected entry",
 		"  s             Set as default boot entry",
 		"  o             Toggle one-shot (next boot only, EFI systems)",
-		"  r             Console-mode resolution preview (loader pane)",
 		"  e             Toggle edit mode",
 		"  Enter         Save changes (in edit mode)",
 		"  Esc           Cancel editing / new entry",
@@ -226,7 +233,7 @@ func (m *model) helpBar() string {
 		if m.editing {
 			return HelpStyle.Render(" e: stop  |  Tab: switch  |  Enter: save  |  Esc: cancel  |  ?: help")
 		}
-		return HelpStyle.Render(" e: edit  |  p: preview file  |  r: resolution preview  |  Tab: switch  |  q: quit  |  ?: help")
+		return HelpStyle.Render(" e: edit  |  p: preview file  |  Tab: switch  |  q: quit  |  ?: help")
 	}
 	return ""
 }

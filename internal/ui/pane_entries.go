@@ -28,11 +28,12 @@ func (m *model) entriesPane(width int) string {
 			badge = WarnBadgeStyle.Render("[!] ")
 		}
 
-		style := ItemStyle.Width(width)
+		badgeWidth := lipgloss.Width(badge)
+		style := ItemStyle.Width(width - badgeWidth)
 		if i == m.selected {
-			style = SelectedItemStyle.Width(width)
+			style = SelectedItemStyle.Width(width - badgeWidth)
 		}
-		line := badge + style.Render(truncate(title, width-lipgloss.Width(badge)))
+		line := badge + style.Render(truncate(title, width-badgeWidth))
 		items.WriteString(line + "\n")
 	}
 
