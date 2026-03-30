@@ -69,6 +69,9 @@ type model struct {
 	// one-shot boot state
 	oneShotEntry  string // entry ID currently set for one-shot, or ""
 	oneShotAvail  bool   // whether EFI variable interface is accessible
+	// console-mode resolution preview
+	showResPreview  bool
+	resPreviewIdx   int // index into consoleModes slice
 }
 
 type Option func(*model)
@@ -179,6 +182,23 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Console-mode resolution preview: arrows cycle, anything else closes.
+	if m.showResPreview {
+		switch msg.Type {
+		case tea.KeyLeft, tea.KeyUp:
+			if m.resPreviewIdx > 0 {
+				m.resPreviewIdx--
+			}
+		case tea.KeyRight, tea.KeyDown:
+			if m.resPreviewIdx < len(consoleModes)-1 {
+				m.resPreviewIdx++
+			}
+		default:
+			m.showResPreview = false
+		}
+		return m, nil
+	}
+
 	// Close preview overlay on any key.
 	if m.showPreview {
 		m.showPreview = false
@@ -256,6 +276,11 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.enterEntryEditMode()
 			} else if m.focused == paneLoader {
 				return m, m.enterLoaderEditMode()
+			}
+		case "r":
+			if m.focused == paneLoader {
+				m.showResPreview = true
+				m.resPreviewIdx = m.currentConsoleModeIdx()
 			}
 		case "p":
 			if m.focused == paneDetail && m.entry != nil && !m.entry.IsUKI {
@@ -388,6 +413,18 @@ func (m *model) saveEntry() {
 }
 
 // isDefaultEntry reports whether entryID matches the loader.conf default token.
+func (m *model) currentConsoleModeIdx() int {
+	if m.loaderConf == nil {
+		return 0
+	}
+	for i, cm := range consoleModes {
+		if cm.token == m.loaderConf.ConsoleMode {
+			return i
+		}
+	}
+	return 0
+}
+
 func (m *model) isDefaultEntry(id string) bool {
 	if m.loaderConf == nil || m.loaderConf.Default == "" {
 		return false
