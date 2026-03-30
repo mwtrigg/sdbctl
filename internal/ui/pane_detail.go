@@ -147,6 +147,13 @@ func (m *model) detailPane(leftColWidth int) string {
 				}
 			}
 
+			if len(m.entry.DTOOverlays) > 0 {
+				content.WriteString("\n")
+				for _, dto := range m.entry.DTOOverlays {
+					content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("devicetree-overlay:"), ValueStyle.Render(dto)))
+				}
+			}
+
 			if m.entryModTime != "" {
 				content.WriteString("\n")
 				content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("modified:"), HelpStyle.Render(m.entryModTime)))

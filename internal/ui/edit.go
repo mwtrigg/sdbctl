@@ -203,14 +203,41 @@ func (m *model) buildEntryFields() {
 	}
 
 	// Devicetree (if set).
-	if e.Devicetree != "" {
+	fields = append(fields, fieldDesc{
+		label:    "machine-id",
+		get:      func() string { return e.MachineID },
+		set:      func(v string) { e.MachineID = strings.TrimSpace(v) },
+		validate: validateMachineID,
+		help:     "32-character lowercase hex machine identifier. Leave empty to omit.",
+	})
+
+	fields = append(fields, fieldDesc{
+		label:    "architecture",
+		get:      func() string { return e.Architecture },
+		set:      func(v string) { e.Architecture = strings.TrimSpace(v) },
+		validate: validateArchitecture,
+		help:     "Override boot architecture: x64, aa64, ia32, riscv64, loongarch64. Usually omitted.",
+	})
+
+	fields = append(fields, fieldDesc{
+		label:    "devicetree",
+		get:      func() string { return e.Devicetree },
+		set:      func(v string) { e.Devicetree = strings.TrimSpace(v) },
+		isPath:   true,
+		validate: validateESPPath,
+		help:     "Device tree blob path relative to ESP root. ARM/RISC-V systems only.",
+	})
+
+	for i := range e.DTOOverlays {
+		idx := i
+		label := fmt.Sprintf("devicetree-overlay[%d]", idx)
 		fields = append(fields, fieldDesc{
-			label:    "devicetree",
-			get:      func() string { return e.Devicetree },
-			set:      func(v string) { e.Devicetree = strings.TrimSpace(v) },
+			label:    label,
+			get:      func() string { return e.DTOOverlays[idx] },
+			set:      func(v string) { e.DTOOverlays[idx] = strings.TrimSpace(v) },
 			isPath:   true,
 			validate: validateESPPath,
-			help:     "Device tree blob path relative to ESP root. ARM/RISC-V systems only.",
+			help:     "Device tree overlay path relative to ESP root.",
 		})
 	}
 
@@ -441,7 +468,10 @@ func (m *model) buildDiff() []diffLine {
 		add("linux", e.Linux, d.Linux)
 		add("initrd", strings.Join(e.Initrds, ", "), strings.Join(d.Initrds, ", "))
 		add("options", strings.Join(e.Options, " "), strings.Join(d.Options, " "))
+		add("machine-id", e.MachineID, d.MachineID)
+		add("architecture", e.Architecture, d.Architecture)
 		add("devicetree", e.Devicetree, d.Devicetree)
+		add("devicetree-overlay", strings.Join(e.DTOOverlays, ", "), strings.Join(d.DTOOverlays, ", "))
 	} else if m.focused == paneLoader && m.loaderConf != nil && m.draftLoader != nil {
 		l, d := m.loaderConf, m.draftLoader
 		add("timeout", l.Timeout, d.Timeout)
@@ -669,6 +699,34 @@ func validateBoolField(s string) string {
 		return ""
 	}
 	return "must be yes or no"
+}
+
+// validateMachineID accepts a 32-char lowercase hex string or empty.
+func validateMachineID(s string) string {
+	if s == "" {
+		return ""
+	}
+	if len(s) != 32 {
+		return "must be exactly 32 hex characters"
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return "must be lowercase hex characters only"
+		}
+	}
+	return ""
+}
+
+// validateArchitecture accepts known systemd-boot architecture tokens or empty.
+func validateArchitecture(s string) string {
+	if s == "" {
+		return ""
+	}
+	switch s {
+	case "x64", "aa64", "ia32", "riscv64", "loongarch64":
+		return ""
+	}
+	return "must be one of: x64, aa64, ia32, riscv64, loongarch64"
 }
 
 // validateRebootOnError mirrors the loader.conf reboot-on-error spec.
