@@ -95,6 +95,9 @@ func (m *model) detailPane(leftColWidth int) string {
 					if f.isPath {
 						content.WriteString(" " + FieldHelpStyle.Render("Tab: path completion") + "\n")
 					}
+					if strings.HasPrefix(f.label, "initrd") || strings.HasPrefix(f.label, "devicetree-overlay") {
+						content.WriteString(" " + FieldHelpStyle.Render("Ctrl+N: add another line") + "\n")
+					}
 					if f.required {
 						content.WriteString(" " + RequiredStyle.Render("* required field") + "\n")
 					}

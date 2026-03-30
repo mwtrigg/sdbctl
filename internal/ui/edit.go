@@ -541,6 +541,12 @@ func (m *model) handleEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyShiftTab:
 		m.editPrevField()
 		return m, nil
+	case tea.KeyCtrlN:
+		// Append a new line to the initrd or devicetree-overlay list.
+		if m.focused == paneDetail && m.draftEntry != nil {
+			m.appendListField()
+			return m, nil
+		}
 	case tea.KeyRunes:
 		if msg.String() == "?" {
 			m.showHelp = !m.showHelp
@@ -552,6 +558,41 @@ func (m *model) handleEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.editInput, cmd = m.editInput.Update(msg)
 	return m, cmd
+}
+
+// appendListField adds a new blank element to the initrd or devicetree-overlay
+// list, rebuilds the field list, and positions the cursor on the new field.
+// It is a no-op if the active field is not one of those two types.
+func (m *model) appendListField() {
+	if m.editFieldIdx >= len(m.editFields) {
+		return
+	}
+	m.saveInputToField()
+	label := m.editFields[m.editFieldIdx].label
+
+	e := m.draftEntry
+	switch {
+	case strings.HasPrefix(label, "initrd"):
+		e.Initrds = append(e.Initrds, "")
+		m.buildEntryFields()
+		// Position on the newly appended initrd field.
+		for i, f := range m.editFields {
+			if strings.HasPrefix(f.label, "initrd") {
+				m.editFieldIdx = i
+			}
+		}
+	case strings.HasPrefix(label, "devicetree-overlay"):
+		e.DTOOverlays = append(e.DTOOverlays, "")
+		m.buildEntryFields()
+		for i, f := range m.editFields {
+			if strings.HasPrefix(f.label, "devicetree-overlay") {
+				m.editFieldIdx = i
+			}
+		}
+	default:
+		return
+	}
+	m.loadFieldIntoInput()
 }
 
 // tabComplete performs path completion on the current input value.
