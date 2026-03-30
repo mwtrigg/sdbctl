@@ -66,7 +66,13 @@ The `-esp` flag is useful in chroot environments (e.g. during Arch installation 
 sudo sdboot-tui -esp /mnt/boot
 ```
 
-Note: one-shot boot (`o` key) writes to `/sys/firmware/efi/efivars` on the **running** system, not the chroot target — it will not work as expected from inside a chroot.
+Note: one-shot boot (`o` key) writes to `/sys/firmware/efi/efivars`. From inside a chroot this will only work if `/sys` is bind-mounted into the chroot:
+
+```bash
+mount --rbind /sys /mnt/sys
+```
+
+Without that, the efivars path will not exist inside the chroot and the one-shot feature will be silently disabled.
 
 ### Keyboard shortcuts
 
