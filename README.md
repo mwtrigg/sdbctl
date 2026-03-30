@@ -24,16 +24,16 @@ Before using, understand the following risks:
 
 ## Screenshots
 
-<!-- screenshot: main view — entries list, detail pane, and loader pane -->
+![Main view — entries list, detail pane, and loader pane](assets/01_MainScreen.png)
 *Main view*
 
-<!-- screenshot: edit mode — field-by-field editing with tab completion dropdown -->
+![Edit mode — field-by-field editing with tab completion dropdown](assets/02_EditEntryTabCompletion.png)
 *Editing a boot entry*
 
-<!-- screenshot: save confirmation diff — changes shown before writing to disk -->
+![Save confirmation diff — changes shown before writing to disk](assets/03_SaveConfirmationDiff.png)
 *Save confirmation with diff view*
 
-<!-- screenshot: ESP validation warning — [!] badge and missing-file errors -->
+![ESP validation warning — [!] badge and missing-file errors](assets/04_EFI-Validation.png)
 *ESP validation warnings*
 
 ---
