@@ -74,7 +74,30 @@ Before using, understand the following risks:
 
 ## Installation
 
+### Pre-built binary (eget)
+
+[eget](https://github.com/zyedidia/eget) installs the latest release binary directly from GitHub:
+
+```bash
+sudo eget mwtrigg/sdboot-tui --to /usr/local/bin/
+```
+
+### go install
+
+Requires Go 1.24+.
+
+```bash
+go install github.com/mwtrigg/sdboot-tui@latest
+sudo mv "$(go env GOPATH)/bin/sdboot-tui" /usr/local/bin/
+```
+
+### AUR
+
+Coming soon.
+
 ### From source
+
+Requires Go 1.24+.
 
 ```bash
 git clone https://github.com/mwtrigg/sdboot-tui
@@ -82,8 +105,6 @@ cd sdboot-tui
 go build -o sdboot-tui .
 sudo mv sdboot-tui /usr/local/bin/
 ```
-
-Requires Go 1.24+.
 
 ## Usage
 
