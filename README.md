@@ -60,11 +60,6 @@ Before using, understand the following risks:
 - Tab/Shift+Tab to switch between panes
 - Nord color theme
 
-## Not yet implemented
-
-- EFI variable inspection beyond one-shot
-- Anything involving `efibootmgr` (boot order, EFI boot entries)
-
 ## Requirements
 
 - Linux with systemd-boot installed
