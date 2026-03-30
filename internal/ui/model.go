@@ -19,15 +19,7 @@ const (
 	paneLoader
 )
 
-type viewMode int
-
-const (
-	_ viewMode = iota
-	viewMain
-)
-
 type model struct {
-	view       viewMode
 	focused    pane
 	espPath    string
 	entries    []*boot.BootEntry
