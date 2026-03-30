@@ -10,7 +10,11 @@ import (
 func (m *model) View() string {
 	if m.err != nil {
 		errText := ErrorStyle.Render(fmt.Sprintf(" Error: %s", m.err.Error()))
-		return OuterFrame.Render(lipgloss.JoinVertical(lipgloss.Top,
+		w := m.width - 2
+		if w < 20 {
+			w = 20
+		}
+		return OuterFrame.Width(w).Render(lipgloss.JoinVertical(lipgloss.Top,
 			m.header(),
 			"\n",
 			errText,
@@ -25,7 +29,11 @@ func (m *model) View() string {
 			m.spinner.View(),
 			"  Discovering boot entries...",
 		)
-		return OuterFrame.Render(lipgloss.JoinVertical(lipgloss.Top,
+		lw := m.width - 2
+		if lw < 20 {
+			lw = 20
+		}
+		return OuterFrame.Width(lw).Render(lipgloss.JoinVertical(lipgloss.Top,
 			m.header(),
 			"\n",
 			PaneContentStyle.Render(loadingText),
@@ -66,7 +74,11 @@ func (m *model) View() string {
 		m.helpBar(),
 	)
 
-	return OuterFrame.Render(appContent)
+	fw := m.width - 2
+	if fw < 20 {
+		fw = 20
+	}
+	return OuterFrame.Width(fw).Render(appContent)
 }
 
 func (m *model) leftPaneWidth() int {
