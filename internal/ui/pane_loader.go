@@ -84,6 +84,11 @@ func (m *model) loaderPane(width int) string {
 				{"console-mode", m.loaderConf.ConsoleMode},
 				{"auto-entries", boolToString(m.loaderConf.AutoEntries)},
 				{"auto-firmware", boolToString(m.loaderConf.AutoFirmware)},
+				{"auto-reboot", boolToString(m.loaderConf.AutoReboot)},
+				{"auto-poweroff", boolToString(m.loaderConf.AutoPowerOff)},
+				{"beep", boolToString(m.loaderConf.Beep)},
+				{"reboot-on-error", m.loaderConf.RebootOnError},
+				{"log-level", m.loaderConf.LogLevel},
 			}
 
 			for _, f := range fields {
