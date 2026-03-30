@@ -169,6 +169,7 @@ func (m *model) helpOverlay() string {
 		"  ──────────────────────────────────────",
 		"  n             New boot entry",
 		"  D             Delete selected entry",
+		"  s             Set as default boot entry",
 		"  o             Toggle one-shot (next boot only, EFI systems)",
 		"  e             Toggle edit mode",
 		"  Enter         Save changes (in edit mode)",
@@ -205,9 +206,9 @@ func (m *model) helpBar() string {
 			return HelpStyle.Render(" ↑/↓: navigate  |  Tab: switch  |  Enter: save  |  Esc: cancel  |  ?: help")
 		}
 		if m.oneShotAvail {
-			return HelpStyle.Render(" ↑/↓: navigate  |  n: new  |  D: delete  |  o: one-shot  |  Tab: switch  |  q: quit  |  ?: help")
+			return HelpStyle.Render(" ↑/↓: navigate  |  n: new  |  D: delete  |  s: set default  |  o: one-shot  |  Tab: switch  |  q: quit  |  ?: help")
 		}
-		return HelpStyle.Render(" ↑/↓: navigate  |  n: new  |  D: delete  |  Tab: switch  |  q: quit  |  ?: help")
+		return HelpStyle.Render(" ↑/↓: navigate  |  n: new  |  D: delete  |  s: set default  |  Tab: switch  |  q: quit  |  ?: help")
 	case paneDetail:
 		if m.editing {
 			return HelpStyle.Render(" ↑/↓: field  |  Tab: next/complete  |  Enter: save  |  Esc: cancel  |  ?: help")

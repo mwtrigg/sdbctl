@@ -247,6 +247,10 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.focused == paneEntries && m.entry != nil && !m.entry.IsUKI && m.oneShotAvail {
 				m.toggleOneShot()
 			}
+		case "s":
+			if m.focused == paneEntries && m.entry != nil && m.loaderConf != nil {
+				m.setDefaultEntry()
+			}
 		case "e":
 			if m.focused == paneDetail && m.entry != nil && !m.entry.IsUKI {
 				return m, m.enterEntryEditMode()
@@ -381,6 +385,30 @@ func (m *model) saveEntry() {
 		return
 	}
 	m.revalidateEntries()
+}
+
+// isDefaultEntry reports whether entryID matches the loader.conf default token.
+func (m *model) isDefaultEntry(id string) bool {
+	if m.loaderConf == nil || m.loaderConf.Default == "" {
+		return false
+	}
+	d := m.loaderConf.Default
+	return d == id || d == id+".conf"
+}
+
+func (m *model) setDefaultEntry() {
+	if m.entry == nil || m.loaderConf == nil {
+		return
+	}
+	// For UKIs the token is just the ID; for .conf entries systemd-boot
+	// matches on filename glob, so "id.conf" is the canonical value.
+	token := m.entry.ID
+	if !m.entry.IsUKI {
+		token = m.entry.ID + ".conf"
+	}
+	m.loaderConf.Default = token
+	m.saveLoaderConf()
+	m.refreshLoaderMeta()
 }
 
 func (m *model) toggleOneShot() {

@@ -22,6 +22,8 @@ func (m *model) entriesPane(width int) string {
 			badge = UKIBadgeStyle.Render("[UKI] ")
 		} else if m.oneShotEntry != "" && m.oneShotEntry == entry.ID {
 			badge = OneShotBadgeStyle.Render("[1x] ")
+		} else if m.isDefaultEntry(entry.ID) {
+			badge = DefaultBadgeStyle.Render("[★] ")
 		} else if len(m.entryWarnings[entry.ID]) > 0 {
 			badge = WarnBadgeStyle.Render("[!] ")
 		}
