@@ -2,8 +2,6 @@
 
 A terminal UI for managing systemd-boot — browse, create, edit, and delete boot entries and loader configuration without touching config files directly.
 
-> **Home repository:** [github.com/mwtrigg/sdboot-tui](https://github.com/mwtrigg/sdboot-tui)
-
 ---
 
 ## ⚠️ Security and Safety Warning
