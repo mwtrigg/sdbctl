@@ -14,13 +14,13 @@ import (
 
 // fieldDesc describes one editable field in a boot entry or loader config.
 type fieldDesc struct {
-	label    string        // key name shown in the UI
-	get      func() string // reads current draft value
-	set      func(string)  // writes value back to draft
-	isPath   bool          // enables ESP tab completion on Tab key
-	required bool          // blocks save if empty
+	label    string              // key name shown in the UI
+	get      func() string       // reads current draft value
+	set      func(string)        // writes value back to draft
+	isPath   bool                // enables ESP tab completion on Tab key
+	required bool                // blocks save if empty
 	validate func(string) string // returns error message, or "" if valid
-	help     string        // context help shown at the bottom of the pane
+	help     string              // context help shown at the bottom of the pane
 }
 
 // espPathsLoaded carries the result of the async ESP filesystem crawl.
@@ -654,7 +654,7 @@ func commonPrefix(strs []string) string {
 }
 
 // validateEntryID checks that s is a valid boot entry filename component:
-// no path separators, no spaces, no dots at the start, non-empty after trim.
+// no path separators, no spaces, no newlines, no dots at the start, non-empty after trim.
 func validateEntryID(s string) string {
 	if s == "" {
 		return "" // handled by required check
@@ -665,6 +665,9 @@ func validateEntryID(s string) string {
 	if strings.ContainsAny(s, "\x00") {
 		return "must not contain null bytes"
 	}
+	if strings.ContainsAny(s, "\n\r") {
+		return "must not contain newlines"
+	}
 	if strings.HasPrefix(s, ".") {
 		return "must not start with a dot"
 	}
@@ -672,7 +675,7 @@ func validateEntryID(s string) string {
 }
 
 // validateESPPath checks that s is a valid absolute ESP-relative path:
-// must start with /, no spaces, no null bytes, no .. traversal.
+// must start with /, no spaces, no newlines, no null bytes, no .. traversal.
 func validateESPPath(s string) string {
 	if s == "" {
 		return "" // handled by required check
@@ -682,6 +685,9 @@ func validateESPPath(s string) string {
 	}
 	if strings.ContainsAny(s, " \t\x00") {
 		return "must not contain spaces or null bytes"
+	}
+	if strings.ContainsAny(s, "\n\r") {
+		return "must not contain newlines"
 	}
 	for _, part := range strings.Split(s, "/") {
 		if part == ".." {

@@ -220,3 +220,144 @@ func TestDisplayTitle(t *testing.T) {
 		}
 	}
 }
+
+func TestParseEntryPreservesRawLines(t *testing.T) {
+	tmpDir := t.TempDir()
+	entryPath := filepath.Join(tmpDir, "preserve-test.conf")
+
+	content := `# Top-level comment
+title My Entry
+# Vendor extension
+foo bar=baz
+linux /vmlinuz
+`
+	if err := os.WriteFile(entryPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	entry, err := ParseEntry(entryPath)
+	if err != nil {
+		t.Fatalf("ParseEntry failed: %v", err)
+	}
+
+	if entry.Title != "My Entry" {
+		t.Errorf("expected title 'My Entry', got '%s'", entry.Title)
+	}
+	if entry.Linux != "/vmlinuz" {
+		t.Errorf("expected linux '/vmlinuz', got '%s'", entry.Linux)
+	}
+
+	expectedRaw := []string{
+		"# Top-level comment",
+		"title My Entry",
+		"# Vendor extension",
+		"foo bar=baz",
+		"linux /vmlinuz",
+	}
+	if len(entry.RawLines) != len(expectedRaw) {
+		t.Fatalf("expected %d raw lines, got %d: %v", len(expectedRaw), len(entry.RawLines), entry.RawLines)
+	}
+	for i, exp := range expectedRaw {
+		if entry.RawLines[i] != exp {
+			t.Errorf("raw line %d: expected %q, got %q", i, exp, entry.RawLines[i])
+		}
+	}
+}
+
+func TestWriteEntryRoundTripPreservesRawLines(t *testing.T) {
+	tmpDir := t.TempDir()
+	entryPath := filepath.Join(tmpDir, "roundtrip.conf")
+
+	original := `# My custom entry
+title My Entry
+# This comment must survive
+grub-users-option somevalue
+linux /vmlinuz
+# Another trailing comment
+`
+	if err := os.WriteFile(entryPath, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	entry, err := ParseEntry(entryPath)
+	if err != nil {
+		t.Fatalf("ParseEntry failed: %v", err)
+	}
+
+	// Modify a known field
+	entry.Title = "Updated Title"
+
+	outPath := filepath.Join(tmpDir, "output.conf")
+	if err := entry.Write(outPath); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	result, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expected := `# My custom entry
+title Updated Title
+# This comment must survive
+grub-users-option somevalue
+linux /vmlinuz
+# Another trailing comment
+`
+	if string(result) != expected {
+		t.Errorf("round-trip output mismatch:\n--- got:\n%s\n--- want:\n%s", string(result), expected)
+	}
+}
+
+func TestWriteFileAtomic(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "atomic-test")
+
+	if err := writeFileAtomic(path, []byte("hello world\n"), 0644); err != nil {
+		t.Fatalf("writeFileAtomic failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "hello world\n" {
+		t.Errorf("expected 'hello world\\n', got %q", string(data))
+	}
+
+	// Write with a different mode and verify new file uses 0644 fallback
+	path2 := filepath.Join(tmpDir, "atomic-test-2")
+	if err := writeFileAtomic(path2, []byte("content\n"), 0644); err != nil {
+		t.Fatalf("writeFileAtomic failed: %v", err)
+	}
+	fi, err := os.Stat(path2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0644 {
+		t.Errorf("expected permissions 0644, got %o", fi.Mode().Perm())
+	}
+
+	// Overwrite preserving existing permissions
+	path3 := filepath.Join(tmpDir, "atomic-test-3")
+	if err := os.WriteFile(path3, []byte("original\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFileAtomic(path3, []byte("overwritten\n"), 0644); err != nil {
+		t.Fatalf("writeFileAtomic failed: %v", err)
+	}
+	fi, err = os.Stat(path3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0600 {
+		t.Errorf("expected permissions preserved as 0600, got %o", fi.Mode().Perm())
+	}
+	data, err = os.ReadFile(path3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "overwritten\n" {
+		t.Errorf("expected 'overwritten\\n', got %q", string(data))
+	}
+}

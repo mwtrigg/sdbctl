@@ -9,17 +9,17 @@ import (
 )
 
 type LoaderConfig struct {
-	Timeout      string
-	Default      string
-	Editor       *bool
-	ConsoleMode  string
-	AutoEntries  *bool
-	AutoFirmware *bool
-	AutoReboot   *bool
-	AutoPowerOff *bool
-	Beep         *bool
+	Timeout       string
+	Default       string
+	Editor        *bool
+	ConsoleMode   string
+	AutoEntries   *bool
+	AutoFirmware  *bool
+	AutoReboot    *bool
+	AutoPowerOff  *bool
+	Beep          *bool
 	RebootOnError string
-	LogLevel     string
+	LogLevel      string
 }
 
 var boolTrue = true
@@ -149,7 +149,7 @@ func (c *LoaderConfig) Write(path string) error {
 		lines = append(lines, fmt.Sprintf("log-level %s", c.LogLevel))
 	}
 
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+	return writeFileAtomic(path, []byte(strings.Join(lines, "\n")+"\n"), 0644)
 }
 
 func parseBool(s string) (*bool, error) {
