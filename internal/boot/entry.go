@@ -237,7 +237,17 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	if err = os.Chmod(tmpPath, mode); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, path)
+	if err = os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	// Sync the parent directory so the rename is durable on non-journaled
+	// filesystems (e.g. FAT32, commonly used for the ESP).
+	parent, parentErr := os.Open(dir)
+	if parentErr == nil {
+		parent.Sync()
+		parent.Close()
+	}
+	return nil
 }
 
 func (e *BootEntry) DisplayTitle() string {
