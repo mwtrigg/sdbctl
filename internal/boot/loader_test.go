@@ -161,3 +161,39 @@ default test.conf
 		t.Errorf("expected default 'test.conf', got '%s'", cfg.Default)
 	}
 }
+
+func TestWriteLoaderConfAtomicPreservesPermissions(t *testing.T) {
+	cfg := &LoaderConfig{
+		Timeout: "10",
+		Default: "test.conf",
+		Editor:  &boolFalse,
+	}
+
+	tmpDir := t.TempDir()
+	loaderConfPath := filepath.Join(tmpDir, "loader.conf")
+
+	// Create file with restricted permissions
+	if err := os.WriteFile(loaderConfPath, []byte("timeout 5\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cfg.Write(loaderConfPath); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	fi, err := os.Stat(loaderConfPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0600 {
+		t.Errorf("expected permissions 0600, got %o", fi.Mode().Perm())
+	}
+
+	parsed, err := ParseLoaderConf(loaderConfPath)
+	if err != nil {
+		t.Fatalf("ParseLoaderConf failed: %v", err)
+	}
+	if parsed.Timeout != "10" {
+		t.Errorf("expected timeout '10', got '%s'", parsed.Timeout)
+	}
+}

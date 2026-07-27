@@ -19,8 +19,9 @@ type BootEntry struct {
 	Devicetree   string
 	DTOOverlays  []string
 	Architecture string
-	IsUKI        bool   // true for entries discovered from EFI/Linux/*.efi
-	EFIPath      string // set for UKI entries: /EFI/Linux/<id>.efi
+	IsUKI        bool     // true for entries discovered from EFI/Linux/*.efi
+	EFIPath      string   // set for UKI entries: /EFI/Linux/<id>.efi
+	RawLines     []string // original lines preserved for round-trip fidelity
 }
 
 func ParseEntry(path string) (*BootEntry, error) {
@@ -33,21 +34,24 @@ func ParseEntry(path string) (*BootEntry, error) {
 		ID: strings.TrimSuffix(filepath.Base(path), ".conf"),
 	}
 
-	for lineNum, line := range strings.Split(string(data), "\n") {
+	content := strings.TrimRight(string(data), "\n")
+	for lineNum, line := range strings.Split(content, "\n") {
 		lineNum++
-		line = strings.TrimSpace(line)
+		trimmed := strings.TrimSpace(line)
 
-		if line == "" || strings.HasPrefix(line, "#") {
+		entry.RawLines = append(entry.RawLines, trimmed)
+
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 
 		// Split on first run of whitespace (space or tab).
-		idx := strings.IndexAny(line, " \t")
+		idx := strings.IndexAny(trimmed, " \t")
 		if idx < 0 {
-			return nil, fmt.Errorf("%s:%d: malformed line: %s", path, lineNum, line)
+			return nil, fmt.Errorf("%s:%d: malformed line: %s", path, lineNum, trimmed)
 		}
-		key := line[:idx]
-		value := strings.TrimSpace(line[idx:])
+		key := trimmed[:idx]
+		value := strings.TrimSpace(trimmed[idx:])
 
 		switch key {
 		case "title":
@@ -71,9 +75,7 @@ func ParseEntry(path string) (*BootEntry, error) {
 		case "architecture":
 			entry.Architecture = value
 		default:
-			// Skip unrecognized keys — real-world entries may contain
-			// vendor extensions or fields added in newer systemd versions.
-			continue
+			// Unrecognized keys are preserved in RawLines.
 		}
 	}
 
@@ -81,6 +83,16 @@ func ParseEntry(path string) (*BootEntry, error) {
 }
 
 func (e *BootEntry) Write(path string) error {
+	var data []byte
+	if len(e.RawLines) > 0 {
+		data = e.writeWithRawLines()
+	} else {
+		data = e.writeStandard()
+	}
+	return writeFileAtomic(path, data, 0644)
+}
+
+func (e *BootEntry) writeStandard() []byte {
 	var lines []string
 
 	if e.Title != "" {
@@ -114,7 +126,118 @@ func (e *BootEntry) Write(path string) error {
 		lines = append(lines, fmt.Sprintf("devicetree-overlay %s", dto))
 	}
 
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
+func (e *BootEntry) writeWithRawLines() []byte {
+	vals := e.valueMap()
+	used := make(map[string]int)
+	var lines []string
+
+	for _, raw := range e.RawLines {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			lines = append(lines, raw)
+			continue
+		}
+		idx := strings.IndexAny(trimmed, " \t")
+		if idx < 0 {
+			lines = append(lines, raw)
+			continue
+		}
+		key := trimmed[:idx]
+
+		vv, ok := vals[key]
+		if !ok {
+			lines = append(lines, raw)
+			continue
+		}
+		i := used[key]
+		if i < len(vv) {
+			lines = append(lines, key+" "+vv[i])
+			used[key] = i + 1
+		}
+	}
+
+	for key, vv := range vals {
+		for i := used[key]; i < len(vv); i++ {
+			lines = append(lines, key+" "+vv[i])
+		}
+	}
+
+	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
+func (e *BootEntry) valueMap() map[string][]string {
+	m := make(map[string][]string)
+	if e.Title != "" {
+		m["title"] = []string{e.Title}
+	}
+	if e.Version != "" {
+		m["version"] = []string{e.Version}
+	}
+	if e.MachineID != "" {
+		m["machine-id"] = []string{e.MachineID}
+	}
+	if e.SortKey != "" {
+		m["sort-key"] = []string{e.SortKey}
+	}
+	if e.Architecture != "" {
+		m["architecture"] = []string{e.Architecture}
+	}
+	if e.Linux != "" {
+		m["linux"] = []string{e.Linux}
+	}
+	if len(e.Initrds) > 0 {
+		m["initrd"] = e.Initrds
+	}
+	if len(e.Options) > 0 {
+		m["options"] = e.Options
+	}
+	if e.Devicetree != "" {
+		m["devicetree"] = []string{e.Devicetree}
+	}
+	if len(e.DTOOverlays) > 0 {
+		m["devicetree-overlay"] = e.DTOOverlays
+	}
+	return m
+}
+
+// writeFileAtomic writes data to path atomically by creating a temp file in the
+// same directory, syncing it, and renaming over the target. If the target file
+// already exists its permissions are preserved; otherwise 0644 is used.
+func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, ".tmp-"+filepath.Base(path))
+	if err != nil {
+		return err
+	}
+	tmpPath := f.Name()
+	defer func() {
+		if err != nil {
+			os.Remove(tmpPath)
+		}
+	}()
+
+	if fi, statErr := os.Stat(path); statErr == nil {
+		mode = fi.Mode().Perm()
+	}
+
+	if _, err = f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	if err = os.Chmod(tmpPath, mode); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 func (e *BootEntry) DisplayTitle() string {

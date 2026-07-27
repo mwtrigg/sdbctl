@@ -18,9 +18,9 @@ const efiVarAttrs uint32 = 0x07
 
 // Linux ioctl constants for file-attribute manipulation (FS_IOC_*).
 const (
-	fsIocGetFlags  = 0x80086601
-	fsIocSetFlags  = 0x40086602
-	fsImmutableFL  = 0x00000010
+	fsIocGetFlags = 0x80086601
+	fsIocSetFlags = 0x40086602
+	fsImmutableFL = 0x00000010
 )
 
 // GetOneShot reads the current LoaderEntryOneShot EFI variable and returns the

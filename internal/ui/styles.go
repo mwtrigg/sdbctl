@@ -97,8 +97,8 @@ var (
 				Bold(true)
 
 	HeaderMetaStyle = lipgloss.NewStyle().
-				Foreground(ColorMeta).
-				Background(ColorHeaderBg)
+			Foreground(ColorMeta).
+			Background(ColorHeaderBg)
 
 	OuterFrame = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).

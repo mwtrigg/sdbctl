@@ -59,8 +59,8 @@ type model struct {
 	// per-entry ESP validation issues (entry ID → issues list)
 	entryWarnings map[string][]string
 	// one-shot boot state
-	oneShotEntry  string // entry ID currently set for one-shot, or ""
-	oneShotAvail  bool   // whether EFI variable interface is accessible
+	oneShotEntry string // entry ID currently set for one-shot, or ""
+	oneShotAvail bool   // whether EFI variable interface is accessible
 }
 
 type Option func(*model)
