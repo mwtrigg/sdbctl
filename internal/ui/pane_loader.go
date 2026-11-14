@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mwtrigg/sdboot-tui/internal/boot"
 )
 
 func (m *model) loaderPane(width int) string {
@@ -80,6 +81,7 @@ func (m *model) loaderPane(width int) string {
 			}{
 				{"timeout", m.loaderConf.Timeout},
 				{"default", m.loaderConf.Default},
+				{"preferred", m.loaderConf.Preferred},
 				{"editor", boolToString(m.loaderConf.Editor)},
 				{"console-mode", m.loaderConf.ConsoleMode},
 				{"auto-entries", boolToString(m.loaderConf.AutoEntries)},
@@ -87,7 +89,11 @@ func (m *model) loaderPane(width int) string {
 				{"auto-reboot", boolToString(m.loaderConf.AutoReboot)},
 				{"auto-poweroff", boolToString(m.loaderConf.AutoPowerOff)},
 				{"beep", boolToString(m.loaderConf.Beep)},
+				{"reboot-for-bitlocker", boolToString(m.loaderConf.RebootForBitlocker)},
 				{"reboot-on-error", m.loaderConf.RebootOnError},
+				{"secure-boot-enroll", m.loaderConf.SecureBootEnroll},
+				{"secure-boot-enroll-action", m.loaderConf.SecureBootEnrollAction},
+				{"secure-boot-enroll-timeout-sec", m.loaderConf.SecureBootEnrollTimeoutSec},
 				{"log-level", m.loaderConf.LogLevel},
 			}
 
@@ -95,6 +101,22 @@ func (m *model) loaderPane(width int) string {
 				if f.value != "" {
 					content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render(f.key+":"), ValueStyle.Render(f.value)))
 				}
+			}
+
+			for _, kv := range m.loaderConf.Extras {
+				content.WriteString(fmt.Sprintf(" %s %s\n",
+					KeyStyle.Render(kv.Key+":"), DimValueStyle.Render(kv.Value+"  (untouched)")))
+			}
+
+			if msg := boot.CheckDefaultEntry(m.loaderConf, m.entries); msg != "" {
+				content.WriteString("\n")
+				for _, line := range wrapText(msg, width-2) {
+					content.WriteString(" " + ErrorStyle.Render("! "+line) + "\n")
+				}
+			}
+
+			for _, issue := range m.loaderConf.Issues {
+				content.WriteString(" " + ErrorStyle.Render("! "+issue) + "\n")
 			}
 
 			if m.loaderModTime != "" {

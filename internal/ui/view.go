@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mwtrigg/sdboot-tui/internal/boot"
 )
 
 func (m *model) View() string {
@@ -50,6 +51,10 @@ func (m *model) View() string {
 
 	if m.showPreview {
 		return m.previewOverlay()
+	}
+
+	if m.showDiag {
+		return m.diagOverlay()
 	}
 
 	if m.showHelp {
@@ -167,6 +172,103 @@ func (m *model) previewOverlay() string {
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, modal)
 }
 
+// diagOverlay renders the boot-environment diagnostics: partition layout,
+// systemd-boot binaries on the ESP, loader.conf consistency and per-entry
+// boot-menu issues.
+func (m *model) diagOverlay() string {
+	maxw := 78
+	if m.width-6 < maxw && m.width > 0 {
+		maxw = m.width - 6
+	}
+	if maxw < 40 {
+		maxw = 40
+	}
+
+	var b strings.Builder
+	add := func(style lipgloss.Style, label, value string) {
+		fmt.Fprintf(&b, "%s %s\n", KeyStyle.Render(label+":"), style.Render(value))
+	}
+	wrap := func(prefix string, lines ...string) {
+		for _, line := range lines {
+			for i, w := range wrapText(line, maxw-4) {
+				if i == 0 {
+					b.WriteString(" " + prefix + w + "\n")
+				} else {
+					b.WriteString("    " + w + "\n")
+				}
+			}
+		}
+	}
+
+	b.WriteString(HelpTitleStyle.Render(" Boot diagnostics ") + "\n\n")
+
+	add(HelpStyle, "Entries on", m.loaderInfo.BootDir)
+	if m.loaderInfo.XBOOTLDR {
+		add(HelpStyle, "ESP at", m.loaderInfo.ESPDir+" (XBOOTLDR layout)")
+	}
+	if m.loaderInfo.LoaderPath != "" {
+		add(HelpStyle, "Loader", m.loaderInfo.LoaderPath+" (systemd-boot "+m.loaderInfo.LoaderVersion+")")
+	}
+	if m.loaderInfo.FallbackPath != "" {
+		add(HelpStyle, "Fallback", m.loaderInfo.FallbackPath)
+	}
+	if m.loaderInfo.PackageVersion != "" {
+		add(HelpStyle, "Package", "systemd-boot "+m.loaderInfo.PackageVersion)
+	}
+	if m.machineID != "" {
+		add(HelpStyle, "machine-id", m.machineID)
+	}
+	if m.oneShotEntry != "" {
+		add(HelpStyle, "One-shot", m.oneShotEntry+" (boots once on next restart)")
+	}
+	if m.lastBooted != "" {
+		add(HelpStyle, "Last booted", m.lastBooted)
+	}
+
+	if len(m.loaderInfo.Problems) > 0 {
+		b.WriteString("\n" + ErrorStyle.Render(" Issues") + "\n")
+		wrap("!", m.loaderInfo.Problems...)
+	}
+
+	if msg := boot.CheckDefaultEntry(m.loaderConf, m.entries); msg != "" {
+		b.WriteString("\n")
+		wrap("!", msg)
+	}
+	if m.loaderConf != nil && len(m.loaderConf.Issues) > 0 {
+		wrap("!", m.loaderConf.Issues...)
+	}
+
+	var warnIDs []string
+	for _, e := range m.entries {
+		if len(m.entryWarnings[e.ID]) > 0 {
+			warnIDs = append(warnIDs, e.ID)
+		}
+	}
+	if len(warnIDs) > 0 {
+		fmt.Fprintf(&b, "\n%s %s\n", ErrorStyle.Render("Entry issues"),
+			HelpStyle.Render("(select an entry and press e/Tab to inspect)"))
+		for _, id := range warnIDs {
+			b.WriteString("  " + KeyStyle.Render(id+".conf") + "\n")
+			wrap("   ! ", m.entryWarnings[id]...)
+		}
+	}
+
+	b.WriteString("\n" + HelpStyle.Render(" Notes") + "\n")
+	wrap("· ", m.loaderInfo.BootHints()...)
+
+	b.WriteString("\n" + HelpStyle.Render(" Press any key to close"))
+
+	modal := HelpModalStyle.Render(b.String())
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, modal)
+}
+
 func (m *model) helpOverlay() string {
 	helpContent := lipgloss.JoinVertical(lipgloss.Top,
 		HelpTitleStyle.Render(" sdboot-tui Help "),
@@ -186,6 +288,8 @@ func (m *model) helpOverlay() string {
 		"  e             Toggle edit mode",
 		"  Enter         Save changes (in edit mode)",
 		"  Esc           Cancel editing / new entry",
+		"  p             Preview raw file (entries or loader.conf)",
+		"  d             Boot diagnostics overlay",
 		"  ?             Toggle this help",
 		"  q             Quit",
 		"",
@@ -218,22 +322,22 @@ func (m *model) helpBar() string {
 			return HelpStyle.Render(" ↑/↓: navigate  |  Tab: switch  |  Enter: save  |  Esc: cancel  |  ?: help")
 		}
 		if m.oneShotAvail {
-			return HelpStyle.Render(" ↑/↓: navigate  |  n: new  |  D: delete  |  s: set default  |  o: one-shot  |  Tab: switch  |  q: quit  |  ?: help")
+			return HelpStyle.Render(" ↑/↓: navigate  |  n: new  |  D: delete  |  s: set default  |  o: one-shot  |  d: diagnostics  |  Tab: switch  |  q: quit  |  ?: help")
 		}
-		return HelpStyle.Render(" ↑/↓: navigate  |  n: new  |  D: delete  |  s: set default  |  Tab: switch  |  q: quit  |  ?: help")
+		return HelpStyle.Render(" ↑/↓: navigate  |  n: new  |  D: delete  |  s: set default  |  d: diagnostics  |  Tab: switch  |  q: quit  |  ?: help")
 	case paneDetail:
 		if m.editing {
 			return HelpStyle.Render(" ↑/↓: field  |  Tab: next/complete  |  Enter: save  |  Esc: cancel  |  ?: help")
 		}
 		if m.entry != nil && m.entry.IsUKI {
-			return HelpStyle.Render(" p: preview file  |  Tab: switch  |  q: quit  |  ?: help")
+			return HelpStyle.Render(" p: show image info  |  Tab: switch  |  q: quit  |  ?: help")
 		}
 		return HelpStyle.Render(" e: edit  |  p: preview file  |  Tab: switch  |  q: quit  |  ?: help")
 	case paneLoader:
 		if m.editing {
 			return HelpStyle.Render(" e: stop  |  Tab: switch  |  Enter: save  |  Esc: cancel  |  ?: help")
 		}
-		return HelpStyle.Render(" e: edit  |  p: preview file  |  Tab: switch  |  q: quit  |  ?: help")
+		return HelpStyle.Render(" e: edit  |  p: preview file  |  d: diagnostics  |  Tab: switch  |  q: quit  |  ?: help")
 	}
 	return ""
 }

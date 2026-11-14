@@ -14,14 +14,85 @@ type BootEntry struct {
 	MachineID    string
 	SortKey      string
 	Linux        string
+	Efi          string // "efi" key: arbitrary EFI program (e.g. Windows Boot Manager)
+	UKI          string // "uki" key: unified kernel image stored outside EFI/Linux/
+	UKIUrl       string // "uki-url" key: network-booted UKI (RFC 3986 URI or ":name.efi")
+	Profile      string // "profile" key: profile number of a multi-profile UKI
 	Initrds      []string
 	Options      []string
 	Devicetree   string
 	DTOOverlays  []string
+	Extras       []string // "extra" keys: .cred/.sysext.raw/.confext.raw/.addon.efi companion files
 	Architecture string
-	IsUKI        bool     // true for entries discovered from EFI/Linux/*.efi
+	IsUKI        bool     // true for entries discovered from EFI/Linux/*.efi or *.uki
+	FileSuffix   string   // ".conf" for Type #1, ".efi"/".uki" for Type #2
 	EFIPath      string   // set for UKI entries: /EFI/Linux/<id>.efi
 	RawLines     []string // original lines preserved for round-trip fidelity
+}
+
+// knownEntryKeys are the Boot Loader Specification Type #1 keys this tool
+// understands. Lines with any other key are preserved verbatim on write.
+// See: https://uapi-group.org/specifications/specs/boot_loader_specification/
+var knownEntryKeys = map[string]bool{
+	"title": true, "version": true, "machine-id": true, "sort-key": true,
+	"linux": true, "initrd": true, "options": true, "devicetree": true,
+	"devicetree-overlay": true, "architecture": true,
+	"efi": true, "uki": true, "uki-url": true, "profile": true, "extra": true,
+}
+
+// entryKeyOrder is the canonical order in which fields are written.
+var entryKeyOrder = []string{
+	"title", "version", "machine-id", "sort-key", "architecture",
+	"efi", "uki", "uki-url", "profile",
+	"linux", "initrd", "options",
+	"devicetree", "devicetree-overlay", "extra",
+}
+
+// FullID returns the entry identifier exactly as systemd-boot knows it: the
+// file name including its ".conf"/".efi"/".uki" suffix. loader.conf default=
+// patterns and the LoaderEntryOneShot/Default EFI variables are matched
+// (case-insensitively, as globs) against this identifier.
+func (e *BootEntry) FullID() string {
+	if e.FileSuffix != "" {
+		return e.ID + e.FileSuffix
+	}
+	if e.IsUKI {
+		return e.ID + ".efi"
+	}
+	return e.ID + ".conf"
+}
+
+// StripEntrySuffix removes a boot entry file suffix from an identifier,
+// returning the "entry token" (e.g. "arch.conf" → "arch"). Matching is
+// case-insensitive.
+func StripEntrySuffix(id string) string {
+	lower := strings.ToLower(id)
+	for _, suffix := range []string{".conf", ".efi", ".uki"} {
+		if strings.HasSuffix(lower, suffix) {
+			return id[:len(id)-len(suffix)]
+		}
+	}
+	return id
+}
+
+// ImageKeys returns which of the mutually exclusive image source keys
+// (linux, efi, uki, uki-url) are set on this entry. systemd-boot drops
+// entries with none or with more than one of these keys.
+func (e *BootEntry) ImageKeys() []string {
+	var keys []string
+	if e.Linux != "" {
+		keys = append(keys, "linux")
+	}
+	if e.Efi != "" {
+		keys = append(keys, "efi")
+	}
+	if e.UKI != "" {
+		keys = append(keys, "uki")
+	}
+	if e.UKIUrl != "" {
+		keys = append(keys, "uki-url")
+	}
+	return keys
 }
 
 func ParseEntry(path string) (*BootEntry, error) {
@@ -31,7 +102,8 @@ func ParseEntry(path string) (*BootEntry, error) {
 	}
 
 	entry := &BootEntry{
-		ID: strings.TrimSuffix(filepath.Base(path), ".conf"),
+		ID:         strings.TrimSuffix(filepath.Base(path), ".conf"),
+		FileSuffix: ".conf",
 	}
 
 	content := strings.TrimRight(string(data), "\n")
@@ -64,6 +136,14 @@ func ParseEntry(path string) (*BootEntry, error) {
 			entry.SortKey = value
 		case "linux":
 			entry.Linux = value
+		case "efi":
+			entry.Efi = value
+		case "uki":
+			entry.UKI = value
+		case "uki-url":
+			entry.UKIUrl = value
+		case "profile":
+			entry.Profile = value
 		case "initrd":
 			entry.Initrds = append(entry.Initrds, value)
 		case "options":
@@ -72,6 +152,8 @@ func ParseEntry(path string) (*BootEntry, error) {
 			entry.Devicetree = value
 		case "devicetree-overlay":
 			entry.DTOOverlays = append(entry.DTOOverlays, strings.Fields(value)...)
+		case "extra":
+			entry.Extras = append(entry.Extras, value)
 		case "architecture":
 			entry.Architecture = value
 		default:
@@ -94,38 +176,11 @@ func (e *BootEntry) Write(path string) error {
 
 func (e *BootEntry) writeStandard() []byte {
 	var lines []string
-
-	if e.Title != "" {
-		lines = append(lines, fmt.Sprintf("title %s", e.Title))
+	for _, key := range entryKeyOrder {
+		for _, v := range e.valueMap()[key] {
+			lines = append(lines, fmt.Sprintf("%s %s", key, v))
+		}
 	}
-	if e.Version != "" {
-		lines = append(lines, fmt.Sprintf("version %s", e.Version))
-	}
-	if e.MachineID != "" {
-		lines = append(lines, fmt.Sprintf("machine-id %s", e.MachineID))
-	}
-	if e.SortKey != "" {
-		lines = append(lines, fmt.Sprintf("sort-key %s", e.SortKey))
-	}
-	if e.Architecture != "" {
-		lines = append(lines, fmt.Sprintf("architecture %s", e.Architecture))
-	}
-	if e.Linux != "" {
-		lines = append(lines, fmt.Sprintf("linux %s", e.Linux))
-	}
-	for _, initrd := range e.Initrds {
-		lines = append(lines, fmt.Sprintf("initrd %s", initrd))
-	}
-	for _, opt := range e.Options {
-		lines = append(lines, fmt.Sprintf("options %s", opt))
-	}
-	if e.Devicetree != "" {
-		lines = append(lines, fmt.Sprintf("devicetree %s", e.Devicetree))
-	}
-	for _, dto := range e.DTOOverlays {
-		lines = append(lines, fmt.Sprintf("devicetree-overlay %s", dto))
-	}
-
 	return []byte(strings.Join(lines, "\n") + "\n")
 }
 
@@ -147,19 +202,23 @@ func (e *BootEntry) writeWithRawLines() []byte {
 		}
 		key := trimmed[:idx]
 
-		vv, ok := vals[key]
-		if !ok {
+		if !knownEntryKeys[key] {
+			// Vendor extensions and unknown keys are kept verbatim.
 			lines = append(lines, raw)
 			continue
 		}
+		vv := vals[key]
 		i := used[key]
+		used[key] = i + 1
 		if i < len(vv) {
 			lines = append(lines, key+" "+vv[i])
-			used[key] = i + 1
 		}
+		// Extra original lines for a key whose value was cleared (or whose
+		// list shrank) are dropped.
 	}
 
-	for key, vv := range vals {
+	for _, key := range entryKeyOrder {
+		vv := vals[key]
 		for i := used[key]; i < len(vv); i++ {
 			lines = append(lines, key+" "+vv[i])
 		}
@@ -168,39 +227,45 @@ func (e *BootEntry) writeWithRawLines() []byte {
 	return []byte(strings.Join(lines, "\n") + "\n")
 }
 
+// valueMap returns the current field values keyed by BLS key name. Cleared
+// fields and empty list elements are represented by short/absent value lists
+// so that writing removes their original lines instead of keeping them.
 func (e *BootEntry) valueMap() map[string][]string {
-	m := make(map[string][]string)
-	if e.Title != "" {
-		m["title"] = []string{e.Title}
+	m := make(map[string][]string, len(entryKeyOrder))
+	for _, key := range entryKeyOrder {
+		m[key] = nil
 	}
-	if e.Version != "" {
-		m["version"] = []string{e.Version}
+	set := func(key, v string) {
+		if v != "" {
+			m[key] = []string{v}
+		}
 	}
-	if e.MachineID != "" {
-		m["machine-id"] = []string{e.MachineID}
-	}
-	if e.SortKey != "" {
-		m["sort-key"] = []string{e.SortKey}
-	}
-	if e.Architecture != "" {
-		m["architecture"] = []string{e.Architecture}
-	}
-	if e.Linux != "" {
-		m["linux"] = []string{e.Linux}
-	}
-	if len(e.Initrds) > 0 {
-		m["initrd"] = e.Initrds
-	}
-	if len(e.Options) > 0 {
-		m["options"] = e.Options
-	}
-	if e.Devicetree != "" {
-		m["devicetree"] = []string{e.Devicetree}
-	}
-	if len(e.DTOOverlays) > 0 {
-		m["devicetree-overlay"] = e.DTOOverlays
-	}
+	set("title", e.Title)
+	set("version", e.Version)
+	set("machine-id", e.MachineID)
+	set("sort-key", e.SortKey)
+	set("architecture", e.Architecture)
+	set("efi", e.Efi)
+	set("uki", e.UKI)
+	set("uki-url", e.UKIUrl)
+	set("profile", e.Profile)
+	set("linux", e.Linux)
+	set("devicetree", e.Devicetree)
+	m["initrd"] = nonEmptyStrings(e.Initrds)
+	m["options"] = nonEmptyStrings(e.Options)
+	m["devicetree-overlay"] = nonEmptyStrings(e.DTOOverlays)
+	m["extra"] = nonEmptyStrings(e.Extras)
 	return m
+}
+
+func nonEmptyStrings(in []string) []string {
+	var out []string
+	for _, s := range in {
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // writeFileAtomic writes data to path atomically by creating a temp file in the
@@ -304,6 +369,10 @@ func ParseAllEntries(espPath string) ([]*BootEntry, error) {
 	return all, nil
 }
 
+// ukiExtensions are the file suffixes systemd-boot reads unified kernel
+// images from in EFI/Linux/. ".uki" support was added in systemd v257.
+var ukiExtensions = []string{".efi", ".uki"}
+
 func parseUKIs(dir string) ([]*BootEntry, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -315,16 +384,29 @@ func parseUKIs(dir string) ([]*BootEntry, error) {
 
 	var result []*BootEntry
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".efi") {
+		if entry.IsDir() {
 			continue
 		}
+		name := entry.Name()
+		lower := strings.ToLower(name)
+		suffix := ""
+		for _, ext := range ukiExtensions {
+			if strings.HasSuffix(lower, ext) {
+				suffix = ext
+				break
+			}
+		}
+		if suffix == "" {
+			continue
+		}
+		base := name[:len(name)-len(suffix)]
 
-		id := strings.TrimSuffix(entry.Name(), ".efi")
 		uki := &BootEntry{
-			ID:      id,
-			Title:   id,
-			IsUKI:   true,
-			EFIPath: "/EFI/Linux/" + entry.Name(),
+			ID:         base,
+			Title:      base,
+			IsUKI:      true,
+			FileSuffix: suffix,
+			EFIPath:    "/EFI/Linux/" + name,
 		}
 		result = append(result, uki)
 	}

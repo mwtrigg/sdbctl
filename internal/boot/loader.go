@@ -8,18 +8,43 @@ import (
 	"strings"
 )
 
+// LoaderConfig mirrors loader.conf(5). Field coverage follows the current
+// systemd documentation (systemd ≥ 259). The parser is deliberately lenient,
+// mirroring systemd-boot itself: unparseable or unknown lines are recorded in
+// Issues and preserved verbatim on round-trip writes, never fatal. That way a
+// distro-provided loader.conf carrying options this tool does not know about
+// (e.g. "keyfile" on older systemd, or future additions) is still displayed
+// and edited safely.
 type LoaderConfig struct {
-	Timeout       string
-	Default       string
-	Editor        *bool
-	ConsoleMode   string
-	AutoEntries   *bool
-	AutoFirmware  *bool
-	AutoReboot    *bool
-	AutoPowerOff  *bool
-	Beep          *bool
-	RebootOnError string
-	LogLevel      string
+	Timeout                    string
+	Default                    string
+	Preferred                  string
+	Editor                     *bool
+	ConsoleMode                string
+	AutoEntries                *bool
+	AutoFirmware               *bool
+	AutoReboot                 *bool
+	AutoPowerOff               *bool
+	Beep                       *bool
+	RebootForBitlocker         *bool
+	RebootOnError              string
+	SecureBootEnroll           string
+	SecureBootEnrollAction     string
+	SecureBootEnrollTimeoutSec string
+	LogLevel                   string
+
+	// Extras holds known-but-not-editable or unknown key/value pairs in file
+	// order, purely for display; raw lines keep them intact on disk.
+	Extras []ExtrasKV
+
+	RawLines []string
+	Issues   []string
+}
+
+// ExtrasKV is a loader.conf line whose key this tool does not edit.
+type ExtrasKV struct {
+	Key   string
+	Value string
 }
 
 var boolTrue = true
@@ -41,10 +66,12 @@ func ParseLoaderConf(path string) (*LoaderConfig, error) {
 
 	cfg := defaultLoaderConfig()
 
-	for lineNum, line := range strings.Split(string(data), "\n") {
+	content := strings.TrimRight(string(data), "\n")
+	for lineNum, raw := range strings.Split(content, "\n") {
 		lineNum++
-		line = strings.TrimSpace(line)
+		cfg.RawLines = append(cfg.RawLines, raw)
 
+		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -52,104 +79,219 @@ func ParseLoaderConf(path string) (*LoaderConfig, error) {
 		// Split on first run of whitespace (space or tab).
 		idx := strings.IndexAny(line, " \t")
 		if idx < 0 {
-			return nil, fmt.Errorf("%s:%d: malformed line: %s", path, lineNum, line)
+			cfg.Issues = append(cfg.Issues, fmt.Sprintf("line %d: malformed, ignored by systemd-boot: %s", lineNum, line))
+			continue
 		}
 		key := line[:idx]
 		value := strings.TrimSpace(line[idx:])
 
-		switch key {
-		case "timeout":
-			cfg.Timeout = value
-		case "default":
-			cfg.Default = value
-		case "editor":
-			b, err := parseBool(value)
-			if err != nil {
-				return nil, fmt.Errorf("%s:%d: invalid editor value: %w", path, lineNum, err)
-			}
-			cfg.Editor = b
-		case "console-mode":
-			cfg.ConsoleMode = value
-		case "auto-entries":
-			b, err := parseBool(value)
-			if err != nil {
-				return nil, fmt.Errorf("%s:%d: invalid auto-entries value: %w", path, lineNum, err)
-			}
-			cfg.AutoEntries = b
-		case "auto-firmware":
-			b, err := parseBool(value)
-			if err != nil {
-				return nil, fmt.Errorf("%s:%d: invalid auto-firmware value: %w", path, lineNum, err)
-			}
-			cfg.AutoFirmware = b
-		case "auto-reboot":
-			b, err := parseBool(value)
-			if err != nil {
-				return nil, fmt.Errorf("%s:%d: invalid auto-reboot value: %w", path, lineNum, err)
-			}
-			cfg.AutoReboot = b
-		case "auto-poweroff":
-			b, err := parseBool(value)
-			if err != nil {
-				return nil, fmt.Errorf("%s:%d: invalid auto-poweroff value: %w", path, lineNum, err)
-			}
-			cfg.AutoPowerOff = b
-		case "beep":
-			b, err := parseBool(value)
-			if err != nil {
-				return nil, fmt.Errorf("%s:%d: invalid beep value: %w", path, lineNum, err)
-			}
-			cfg.Beep = b
-		case "reboot-on-error":
-			cfg.RebootOnError = value
-		case "log-level":
-			cfg.LogLevel = value
-		default:
-			return nil, fmt.Errorf("%s:%d: unknown option: %s", path, lineNum, key)
+		issue := cfg.apply(key, value)
+		if issue != "" {
+			cfg.Issues = append(cfg.Issues, fmt.Sprintf("line %d: %s", lineNum, issue))
 		}
 	}
 
 	return cfg, nil
 }
 
+// apply sets the field for key, returning an issue message when the value is
+// invalid (the value is then left at its default) or "" on success. Unknown
+// keys become Extras entries and return "".
+func (c *LoaderConfig) apply(key, value string) string {
+	parseB := func(field **bool) string {
+		b, err := parseBool(value)
+		if err != nil {
+			return fmt.Sprintf("invalid boolean for %s: %q (systemd-boot ignores this line)", key, value)
+		}
+		*field = b
+		return ""
+	}
+
+	switch key {
+	case "timeout":
+		c.Timeout = value
+	case "default":
+		c.Default = value
+	case "preferred":
+		c.Preferred = value
+	case "editor":
+		return parseB(&c.Editor)
+	case "console-mode":
+		c.ConsoleMode = value
+	case "auto-entries":
+		return parseB(&c.AutoEntries)
+	case "auto-firmware":
+		return parseB(&c.AutoFirmware)
+	case "auto-reboot":
+		return parseB(&c.AutoReboot)
+	case "auto-poweroff":
+		return parseB(&c.AutoPowerOff)
+	case "beep":
+		return parseB(&c.Beep)
+	case "reboot-for-bitlocker":
+		return parseB(&c.RebootForBitlocker)
+	case "reboot-on-error":
+		c.RebootOnError = value
+	case "secure-boot-enroll":
+		c.SecureBootEnroll = value
+	case "secure-boot-enroll-action":
+		c.SecureBootEnrollAction = value
+	case "secure-boot-enroll-timeout-sec":
+		c.SecureBootEnrollTimeoutSec = value
+	case "log-level":
+		c.LogLevel = value
+	default:
+		c.Extras = append(c.Extras, ExtrasKV{Key: key, Value: value})
+	}
+	return ""
+}
+
+// editableKeys are the loader.conf keys represented by struct fields; they
+// round-trip through editing. Anything else is preserved verbatim.
+var editableLoaderKeys = map[string]bool{
+	"timeout": true, "default": true, "preferred": true, "editor": true,
+	"console-mode": true, "auto-entries": true, "auto-firmware": true,
+	"auto-reboot": true, "auto-poweroff": true, "beep": true,
+	"reboot-for-bitlocker": true, "reboot-on-error": true,
+	"secure-boot-enroll": true, "secure-boot-enroll-action": true,
+	"secure-boot-enroll-timeout-sec": true, "log-level": true,
+}
+
+// loaderKeyOrder is the canonical write order (mirrors loader.conf(5)).
+var loaderKeyOrder = []string{
+	"timeout", "default", "preferred", "editor", "console-mode",
+	"auto-entries", "auto-firmware", "auto-reboot", "auto-poweroff", "beep",
+	"reboot-for-bitlocker", "reboot-on-error",
+	"secure-boot-enroll", "secure-boot-enroll-action", "secure-boot-enroll-timeout-sec",
+	"log-level",
+}
+
 func (c *LoaderConfig) Write(path string) error {
+	var data []byte
+	if len(c.RawLines) > 0 {
+		data = c.writeWithRawLines()
+	} else {
+		data = c.writeStandard()
+	}
+	return writeFileAtomic(path, data, 0644)
+}
+
+func (c *LoaderConfig) writeStandard() []byte {
+	var lines []string
+	for _, kv := range c.valueMap() {
+		lines = append(lines, kv.Key+" "+kv.Value)
+	}
+	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
+func (c *LoaderConfig) writeWithRawLines() []byte {
+	vals := c.valueMap()
+	valIdx := make(map[string]int, len(vals))
+	for i, kv := range vals {
+		valIdx[kv.Key] = i
+	}
+	used := make(map[string]int)
 	var lines []string
 
-	if c.Timeout != "" {
-		lines = append(lines, fmt.Sprintf("timeout %s", c.Timeout))
-	}
-	if c.Default != "" {
-		lines = append(lines, fmt.Sprintf("default %s", c.Default))
-	}
-	if c.Editor != nil {
-		lines = append(lines, fmt.Sprintf("editor %s", formatBool(*c.Editor)))
-	}
-	if c.ConsoleMode != "" {
-		lines = append(lines, fmt.Sprintf("console-mode %s", c.ConsoleMode))
-	}
-	if c.AutoEntries != nil {
-		lines = append(lines, fmt.Sprintf("auto-entries %s", formatBool(*c.AutoEntries)))
-	}
-	if c.AutoFirmware != nil {
-		lines = append(lines, fmt.Sprintf("auto-firmware %s", formatBool(*c.AutoFirmware)))
-	}
-	if c.AutoReboot != nil {
-		lines = append(lines, fmt.Sprintf("auto-reboot %s", formatBool(*c.AutoReboot)))
-	}
-	if c.AutoPowerOff != nil {
-		lines = append(lines, fmt.Sprintf("auto-poweroff %s", formatBool(*c.AutoPowerOff)))
-	}
-	if c.Beep != nil {
-		lines = append(lines, fmt.Sprintf("beep %s", formatBool(*c.Beep)))
-	}
-	if c.RebootOnError != "" {
-		lines = append(lines, fmt.Sprintf("reboot-on-error %s", c.RebootOnError))
-	}
-	if c.LogLevel != "" {
-		lines = append(lines, fmt.Sprintf("log-level %s", c.LogLevel))
+	for _, raw := range c.RawLines {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			lines = append(lines, raw)
+			continue
+		}
+		idx := strings.IndexAny(trimmed, " \t")
+		if idx < 0 {
+			// Malformed line: keep verbatim (systemd-boot ignores it too).
+			lines = append(lines, raw)
+			continue
+		}
+		key := trimmed[:idx]
+		if !editableLoaderKeys[key] {
+			// Unknown key: keep verbatim.
+			lines = append(lines, raw)
+			continue
+		}
+
+		i, has := valIdx[key]
+		n := used[key]
+		used[key] = n + 1
+		// vals[key] lists at most one value (loader.conf keys are
+		// single-valued); a cleared field is absent from valIdx, and the
+		// original line is then dropped.
+		if has && n == 0 {
+			lines = append(lines, key+" "+vals[i].Value)
+		}
 	}
 
-	return writeFileAtomic(path, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+	// Append values for fields that had no line in the original file.
+	for _, kv := range vals {
+		if used[kv.Key] == 0 {
+			lines = append(lines, kv.Key+" "+kv.Value)
+		}
+	}
+
+	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
+// valueMap returns non-empty current values in canonical key order. Bool
+// fields are only emitted when explicitly set.
+func (c *LoaderConfig) valueMap() []ExtrasKV {
+	str := func(key, v string) (ExtrasKV, bool) {
+		if v == "" {
+			return ExtrasKV{}, false
+		}
+		return ExtrasKV{key, v}, true
+	}
+	boo := func(key string, v *bool) (ExtrasKV, bool) {
+		if v == nil {
+			return ExtrasKV{}, false
+		}
+		return ExtrasKV{key, formatBool(*v)}, true
+	}
+
+	var out []ExtrasKV
+	add := func(kv ExtrasKV, ok bool) {
+		if ok {
+			out = append(out, kv)
+		}
+	}
+	for _, key := range loaderKeyOrder {
+		switch key {
+		case "timeout":
+			add(str(key, c.Timeout))
+		case "default":
+			add(str(key, c.Default))
+		case "preferred":
+			add(str(key, c.Preferred))
+		case "editor":
+			add(boo(key, c.Editor))
+		case "console-mode":
+			add(str(key, c.ConsoleMode))
+		case "auto-entries":
+			add(boo(key, c.AutoEntries))
+		case "auto-firmware":
+			add(boo(key, c.AutoFirmware))
+		case "auto-reboot":
+			add(boo(key, c.AutoReboot))
+		case "auto-poweroff":
+			add(boo(key, c.AutoPowerOff))
+		case "beep":
+			add(boo(key, c.Beep))
+		case "reboot-for-bitlocker":
+			add(boo(key, c.RebootForBitlocker))
+		case "reboot-on-error":
+			add(str(key, c.RebootOnError))
+		case "secure-boot-enroll":
+			add(str(key, c.SecureBootEnroll))
+		case "secure-boot-enroll-action":
+			add(str(key, c.SecureBootEnrollAction))
+		case "secure-boot-enroll-timeout-sec":
+			add(str(key, c.SecureBootEnrollTimeoutSec))
+		case "log-level":
+			add(str(key, c.LogLevel))
+		}
+	}
+	return out
 }
 
 func parseBool(s string) (*bool, error) {

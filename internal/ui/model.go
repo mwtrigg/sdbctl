@@ -53,14 +53,21 @@ type model struct {
 	showPreview    bool
 	previewTitle   string
 	previewContent string
+	// diagnostics overlay
+	showDiag bool
 	// cached file metadata
 	entryModTime  string
 	loaderModTime string
-	// per-entry ESP validation issues (entry ID → issues list)
+	// per-entry boot menu issues (entry ID → issues list)
 	entryWarnings map[string][]string
 	// one-shot boot state
-	oneShotEntry string // entry ID currently set for one-shot, or ""
+	oneShotEntry string // entry token currently set for one-shot, or ""
 	oneShotAvail bool   // whether EFI variable interface is accessible
+	// host context for validation and diagnostics
+	machineID  string // local /etc/machine-id, "" if unknown
+	archToken  string // local EFI architecture token
+	lastBooted string // entry token of the last @saved boot, or ""
+	loaderInfo boot.LoaderStatus
 }
 
 type Option func(*model)
@@ -108,13 +115,35 @@ func discoverBoot(overridePath string) tea.Msg {
 	if entries == nil {
 		entries = []*boot.BootEntry{}
 	}
-	return bootLoaded{espPath, cfg, entries}
+
+	msg := bootLoaded{
+		espPath:    espPath,
+		loaderConf: cfg,
+		entries:    entries,
+		machineID:  boot.ReadMachineID(),
+		archToken:  boot.LocalArchToken(),
+		loaderInfo: boot.InspectLoader(espPath),
+	}
+	if boot.OneShotAvailable() {
+		if id, err := boot.GetOneShot(); err == nil {
+			msg.oneShot = boot.StripEntrySuffix(id)
+		}
+		if id, err := boot.GetLastBooted(); err == nil {
+			msg.lastBooted = boot.StripEntrySuffix(id)
+		}
+	}
+	return msg
 }
 
 type bootLoaded struct {
 	espPath    string
 	loaderConf *boot.LoaderConfig
 	entries    []*boot.BootEntry
+	machineID  string
+	archToken  string
+	loaderInfo boot.LoaderStatus
+	oneShot    string
+	lastBooted string
 }
 
 type errMsg struct{ err error }
@@ -130,6 +159,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.espPath = msg.espPath
 		m.loaderConf = msg.loaderConf
 		m.entries = msg.entries
+		m.machineID = msg.machineID
+		m.archToken = msg.archToken
+		m.loaderInfo = msg.loaderInfo
+		m.oneShotEntry = msg.oneShot
+		m.lastBooted = msg.lastBooted
 		if len(m.entries) > 0 {
 			m.entry = m.entries[0]
 		}
@@ -137,11 +171,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshLoaderMeta()
 		m.revalidateEntries()
 		m.oneShotAvail = boot.OneShotAvailable()
-		if m.oneShotAvail {
-			if id, err := boot.GetOneShot(); err == nil {
-				m.oneShotEntry = id
-			}
-		}
 		// Kick off async ESP path crawl for tab completion.
 		return m, crawlESP(msg.espPath)
 
@@ -174,6 +203,12 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Close preview overlay on any key.
 	if m.showPreview {
 		m.showPreview = false
+		return m, nil
+	}
+
+	// Close diagnostics overlay on any key.
+	if m.showDiag {
+		m.showDiag = false
 		return m, nil
 	}
 
@@ -235,8 +270,10 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.focused == paneEntries && m.entry != nil && !m.entry.IsUKI {
 				m.deleting = true
 			}
+		case "d":
+			m.showDiag = true
 		case "o":
-			if m.focused == paneEntries && m.entry != nil && !m.entry.IsUKI && m.oneShotAvail {
+			if m.focused == paneEntries && m.entry != nil && m.oneShotAvail {
 				m.toggleOneShot()
 			}
 		case "s":
@@ -250,7 +287,7 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.enterLoaderEditMode()
 			}
 		case "p":
-			if m.focused == paneDetail && m.entry != nil && !m.entry.IsUKI {
+			if m.focused == paneDetail && m.entry != nil {
 				m.loadEntryPreview()
 				m.showPreview = true
 			} else if m.focused == paneLoader && m.loaderConf != nil {
@@ -294,6 +331,26 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.focused = paneDetail
 		}
 
+	case tea.KeyRight:
+		switch m.focused {
+		case paneEntries:
+			m.focused = paneDetail
+		case paneDetail:
+			m.focused = paneLoader
+		case paneLoader:
+			m.focused = paneEntries
+		}
+
+	case tea.KeyLeft:
+		switch m.focused {
+		case paneEntries:
+			m.focused = paneLoader
+		case paneDetail:
+			m.focused = paneEntries
+		case paneLoader:
+			m.focused = paneDetail
+		}
+
 	case tea.KeyEscape:
 		if m.showHelp {
 			m.showHelp = false
@@ -303,12 +360,32 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// entryConfPath returns the on-disk path of an entry file, for either
+// Type #1 (.conf) or Type #2 (UKI) entries. Returns "" for new entries that
+// have no ID yet.
+func (m *model) entryConfPath(e *boot.BootEntry) string {
+	if e == nil || m.espPath == "" {
+		return ""
+	}
+	if e.IsUKI {
+		suffix := e.FileSuffix
+		if suffix == "" {
+			suffix = ".efi"
+		}
+		return filepath.Join(m.espPath, "EFI", "Linux", e.ID+suffix)
+	}
+	if e.ID == "" {
+		return ""
+	}
+	return filepath.Join(m.espPath, "loader", "entries", e.ID+".conf")
+}
+
 func (m *model) refreshEntryMeta() {
-	if m.entry == nil || m.espPath == "" {
+	path := m.entryConfPath(m.entry)
+	if path == "" {
 		m.entryModTime = ""
 		return
 	}
-	path := filepath.Join(m.espPath, "loader", "entries", m.entry.ID+".conf")
 	if info, err := os.Stat(path); err == nil {
 		m.entryModTime = info.ModTime().Format("2006-01-02 15:04")
 	} else {
@@ -320,8 +397,20 @@ func (m *model) loadEntryPreview() {
 	if m.entry == nil {
 		return
 	}
-	path := filepath.Join(m.espPath, "loader", "entries", m.entry.ID+".conf")
-	m.previewTitle = " " + m.entry.ID + ".conf "
+	path := m.entryConfPath(m.entry)
+	m.previewTitle = " " + filepath.Base(path) + " "
+	if m.entry.IsUKI {
+		// A UKI is a PE binary, not a text file: show metadata instead.
+		info, err := os.Stat(path)
+		if err != nil {
+			m.previewContent = fmt.Sprintf("error reading file: %v", err)
+			return
+		}
+		m.previewContent = fmt.Sprintf(
+			"Unified Kernel Image (EFI binary, no text preview)\n\npath: %s\nsize: %d bytes\nmodified: %s\n\nkernel, initrd and cmdline are embedded in this file.",
+			path, info.Size(), info.ModTime().Format("2006-01-02 15:04"))
+		return
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		m.previewContent = fmt.Sprintf("error reading file: %v", err)
@@ -356,11 +445,16 @@ func (m *model) refreshLoaderMeta() {
 
 func (m *model) revalidateEntries() {
 	warnings := make(map[string][]string)
+	ctx := boot.ValidationContext{
+		ESPPath:      m.espPath,
+		MachineID:    m.machineID,
+		Architecture: m.archToken,
+	}
 	for _, e := range m.entries {
 		if e.IsUKI {
 			continue
 		}
-		if verr := boot.ValidateEntry(e, m.espPath); verr != nil {
+		if verr := boot.ValidateEntry(e, ctx); verr != nil {
 			warnings[e.ID] = verr.Issues
 		}
 	}
@@ -379,25 +473,29 @@ func (m *model) saveEntry() {
 	m.revalidateEntries()
 }
 
-func (m *model) isDefaultEntry(id string) bool {
+// isDefaultEntry reports whether the loader.conf default pattern selects the
+// given entry. systemd-boot globs the pattern (case-insensitively) against
+// the full entry ID including the .conf/.efi suffix. With default @saved the
+// effective default is the entry booted last, which we know from the
+// LoaderEntryLastBooted EFI variable.
+func (m *model) isDefaultEntry(e *boot.BootEntry) bool {
 	if m.loaderConf == nil || m.loaderConf.Default == "" {
 		return false
 	}
 	d := m.loaderConf.Default
-	return d == id || d == id+".conf"
+	if boot.DefaultSpecials[d] {
+		return m.lastBooted != "" && m.lastBooted == e.ID
+	}
+	return boot.MatchEntryID(d, e.FullID())
 }
 
 func (m *model) setDefaultEntry() {
 	if m.entry == nil || m.loaderConf == nil {
 		return
 	}
-	// For UKIs the token is just the ID; for .conf entries systemd-boot
-	// matches on filename glob, so "id.conf" is the canonical value.
-	token := m.entry.ID
-	if !m.entry.IsUKI {
-		token = m.entry.ID + ".conf"
-	}
-	m.loaderConf.Default = token
+	// systemd-boot matches default= against the full entry ID, i.e. the
+	// file name including the .conf (Type #1) or .efi/.uki (Type #2) suffix.
+	m.loaderConf.Default = m.entry.FullID()
 	m.saveLoaderConf()
 	m.refreshLoaderMeta()
 }
@@ -414,7 +512,9 @@ func (m *model) toggleOneShot() {
 		}
 		m.oneShotEntry = ""
 	} else {
-		if err := boot.SetOneShot(m.entry.ID); err != nil {
+		// The variable is glob-matched against full entry IDs by the boot
+		// loader, so it must carry the .conf/.efi suffix to match anything.
+		if err := boot.SetOneShot(m.entry.FullID()); err != nil {
 			m.err = err
 			return
 		}

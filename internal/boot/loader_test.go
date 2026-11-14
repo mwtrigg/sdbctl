@@ -3,6 +3,7 @@ package boot
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -96,9 +97,69 @@ func TestParseLoaderConfInvalidBool(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := ParseLoaderConf(loaderConfPath)
-	if err == nil {
-		t.Error("expected error for invalid boolean")
+	// Parsing must not fail: systemd-boot itself ignores the bad line, and
+	// the tool must still render/edit the rest of the file. The problem is
+	// surfaced in Issues instead.
+	cfg, err := ParseLoaderConf(loaderConfPath)
+	if err != nil {
+		t.Fatalf("ParseLoaderConf must be lenient, got error: %v", err)
+	}
+	if len(cfg.Issues) == 0 {
+		t.Error("expected an issue for invalid boolean value")
+	}
+}
+
+func TestParseLoaderConfUnknownKeys(t *testing.T) {
+	tmpDir := t.TempDir()
+	loaderConfPath := filepath.Join(tmpDir, "loader.conf")
+	content := `# distro managed
+timeout 3
+secure-boot-enroll if-safe
+keyfile /loader/keys/auto/KEYFILE.key
+reboot-for-bitlocker yes
+preferred fedora-*.conf
+`
+	if err := os.WriteFile(loaderConfPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseLoaderConf(loaderConfPath)
+	if err != nil {
+		t.Fatalf("ParseLoaderConf failed: %v", err)
+	}
+	if cfg.SecureBootEnroll != "if-safe" {
+		t.Errorf("secure-boot-enroll: got %q", cfg.SecureBootEnroll)
+	}
+	if cfg.RebootForBitlocker == nil || !*cfg.RebootForBitlocker {
+		t.Error("reboot-for-bitlocker not parsed")
+	}
+	if cfg.Preferred != "fedora-*.conf" {
+		t.Errorf("preferred: got %q", cfg.Preferred)
+	}
+	// "keyfile" is not known to the tool: it must be listed as an extra,
+	// flagged nowhere as fatal, and survive a round-trip verbatim.
+	if len(cfg.Extras) != 1 || cfg.Extras[0].Key != "keyfile" {
+		t.Fatalf("expected keyfile in Extras, got %+v", cfg.Extras)
+	}
+
+	// Editing a known field must not lose the comment or the unknown key.
+	cfg.Timeout = "5"
+	out := filepath.Join(tmpDir, "loader.conf.out")
+	if err := cfg.Write(out); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{"# distro managed", "keyfile /loader/keys/auto/KEYFILE.key", "timeout 5", "secure-boot-enroll if-safe"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("round-trip lost %q:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "timeout 3") {
+		t.Errorf("old timeout value survived:\n%s", s)
 	}
 }
 

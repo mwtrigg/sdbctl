@@ -83,6 +83,10 @@ var (
 				Foreground(lipgloss.Color("#B48EAD")). // Nord aurora purple
 				Bold(true)
 
+	BootedBadgeStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#A3BE8C")). // Nord frost green
+				Bold(true)
+
 	DefaultBadgeStyle = lipgloss.NewStyle().
 				Foreground(ColorAmber).
 				Bold(true)

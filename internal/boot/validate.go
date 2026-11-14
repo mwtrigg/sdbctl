@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type ValidationError struct {
@@ -15,53 +16,90 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("validation failed for %s: %v", e.EntryID, e.Issues)
 }
 
-func ValidateEntry(entry *BootEntry, espPath string) *ValidationError {
+// ValidationContext carries host facts needed to judge whether an entry would
+// actually be shown and boot by systemd-boot on this machine. Empty optional
+// fields simply skip the corresponding check.
+type ValidationContext struct {
+	ESPPath      string
+	MachineID    string // contents of /etc/machine-id, "" when unknown
+	Architecture string // EFI architecture token of this machine (x64, aa64, …)
+}
+
+// ValidateEntry checks a Type #1 entry the way systemd-boot would: entries
+// with a missing image key, conflicting image keys, or missing referenced
+// files are silently dropped from the boot menu. Warnings that do not hide
+// the entry (machine-id mismatch, missing root=) are reported as issues too,
+// since they are common causes of broken or unexpected boots.
+func ValidateEntry(entry *BootEntry, ctx ValidationContext) *ValidationError {
 	var issues []string
 
-	if entry.Linux == "" {
-		issues = append(issues, "missing linux field")
-	} else {
-		path := filepath.Join(espPath, entry.Linux)
-		if _, err := os.Stat(path); err != nil {
+	// Exactly one of linux/efi/uki/uki-url must be present; systemd-boot
+	// drops the entry otherwise (LOADER_BAD in boot.c).
+	switch keys := entry.ImageKeys(); len(keys) {
+	case 0:
+		issues = append(issues, "no linux/efi/uki/uki-url key — systemd-boot ignores this entry")
+	case 1:
+	default:
+		issues = append(issues, fmt.Sprintf(
+			"conflicting image keys (%s) — systemd-boot ignores this entry",
+			strings.Join(keys, ", ")))
+	}
+
+	// Referenced files must exist on the boot partition: systemd-boot hides
+	// entries whose kernel/initrd/efi file cannot be opened. This is the most
+	// common cause of stale entries from removed kernels or mistyped paths.
+	checkFile := func(field, p string) {
+		if p == "" {
+			return
+		}
+		full := filepath.Join(ctx.ESPPath, filepath.FromSlash(p))
+		if _, err := os.Stat(full); err != nil {
 			if os.IsNotExist(err) {
-				issues = append(issues, fmt.Sprintf("linux file not found: %s", entry.Linux))
+				issues = append(issues, fmt.Sprintf("%s file not found: %s (entry hidden from boot menu)", field, p))
 			} else {
-				issues = append(issues, fmt.Sprintf("cannot stat linux file: %v", err))
+				issues = append(issues, fmt.Sprintf("cannot stat %s file: %v", field, err))
 			}
 		}
 	}
-
+	checkFile("linux", entry.Linux)
+	checkFile("efi", entry.Efi)
+	checkFile("uki", entry.UKI)
 	for _, initrd := range entry.Initrds {
-		path := filepath.Join(espPath, initrd)
-		if _, err := os.Stat(path); err != nil {
-			if os.IsNotExist(err) {
-				issues = append(issues, fmt.Sprintf("initrd file not found: %s", initrd))
-			} else {
-				issues = append(issues, fmt.Sprintf("cannot stat initrd file: %v", err))
-			}
-		}
+		checkFile("initrd", initrd)
 	}
-
-	if entry.Devicetree != "" {
-		path := filepath.Join(espPath, entry.Devicetree)
-		if _, err := os.Stat(path); err != nil {
-			if os.IsNotExist(err) {
-				issues = append(issues, fmt.Sprintf("devicetree file not found: %s", entry.Devicetree))
-			} else {
-				issues = append(issues, fmt.Sprintf("cannot stat devicetree file: %v", err))
-			}
-		}
-	}
-
+	checkFile("devicetree", entry.Devicetree)
 	for _, dto := range entry.DTOOverlays {
-		path := filepath.Join(espPath, dto)
-		if _, err := os.Stat(path); err != nil {
-			if os.IsNotExist(err) {
-				issues = append(issues, fmt.Sprintf("devicetree-overlay file not found: %s", dto))
-			} else {
-				issues = append(issues, fmt.Sprintf("cannot stat devicetree-overlay file: %v", err))
-			}
-		}
+		checkFile("devicetree-overlay", dto)
+	}
+	for _, extra := range entry.Extras {
+		checkFile("extra", extra)
+	}
+
+	// An entry with a non-matching architecture token is hidden.
+	if entry.Architecture != "" && ctx.Architecture != "" &&
+		!strings.EqualFold(entry.Architecture, ctx.Architecture) {
+		issues = append(issues, fmt.Sprintf(
+			"architecture %q does not match this system (%s) — entry hidden from boot menu",
+			entry.Architecture, ctx.Architecture))
+	}
+
+	// machine-id is used for sorting and title disambiguation; a foreign
+	// machine-id usually means the entry was copied from another install.
+	if entry.MachineID != "" && ctx.MachineID != "" && entry.MachineID != ctx.MachineID {
+		issues = append(issues, fmt.Sprintf(
+			"machine-id %s differs from this system — entry belongs to another OS installation",
+			entry.MachineID))
+	}
+
+	// Kernel command line sanity. systemd falls back to discovering the root
+	// partition via the GPT "root" partition type when no root= is given; if
+	// the disk layout does not follow the Discoverable Partitions Spec the
+	// boot hangs in the initramfs. This has bricked updates on Arch-family
+	// distros using manual entries + dracut, so warn explicitly.
+	if entry.Linux != "" && !hasOption(entry, "root") {
+		issues = append(issues,
+			"options have no root= — boot relies on systemd gpt-auto-discovery; "+
+				"add root=UUID=… unless the root partition is Discoverable Partitions Spec compliant")
 	}
 
 	if len(issues) > 0 {
@@ -74,11 +112,25 @@ func ValidateEntry(entry *BootEntry, espPath string) *ValidationError {
 	return nil
 }
 
-func ValidateEntries(entries []*BootEntry, espPath string) []error {
+// hasOption reports whether any options line contains a parameter "name="
+// (comparison is case-sensitive, kernel parameters are).
+func hasOption(entry *BootEntry, name string) bool {
+	prefix := name + "="
+	for _, line := range entry.Options {
+		for _, opt := range strings.Fields(line) {
+			if strings.HasPrefix(opt, prefix) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func ValidateEntries(entries []*BootEntry, ctx ValidationContext) []error {
 	var errors []error
 
 	for _, entry := range entries {
-		if err := ValidateEntry(entry, espPath); err != nil {
+		if err := ValidateEntry(entry, ctx); err != nil {
 			errors = append(errors, err)
 		}
 	}
@@ -113,5 +165,66 @@ func ValidateLoaderConf(cfg *LoaderConfig) error {
 		}
 	}
 
+	if cfg.SecureBootEnroll != "" {
+		switch cfg.SecureBootEnroll {
+		case "if-safe", "manual", "off", "force":
+		default:
+			return fmt.Errorf("invalid secure-boot-enroll: %s (expected if-safe, manual, off, or force)", cfg.SecureBootEnroll)
+		}
+	}
+
+	if cfg.SecureBootEnrollAction != "" {
+		switch cfg.SecureBootEnrollAction {
+		case "reboot", "shutdown":
+		default:
+			return fmt.Errorf("invalid secure-boot-enroll-action: %s (expected reboot or shutdown)", cfg.SecureBootEnrollAction)
+		}
+	}
+
 	return nil
+}
+
+// DefaultSpecials are loader.conf default values handled by the boot loader
+// itself rather than by matching against entry IDs.
+var DefaultSpecials = map[string]bool{
+	"@saved": true,
+}
+
+// MatchEntryID reports whether a loader.conf default=/preferred= glob pattern
+// selects the given entry. systemd-boot compares the pattern against the full
+// entry ID — the file name including the .conf/.efi suffix — case
+// insensitively.
+func MatchEntryID(pattern, fullID string) bool {
+	if pattern == "" {
+		return false
+	}
+	p, id := strings.ToLower(pattern), strings.ToLower(fullID)
+	if !strings.ContainsAny(p, "*?[") {
+		return p == id
+	}
+	ok, err := filepath.Match(p, id)
+	return err == nil && ok
+}
+
+// CheckDefaultEntry verifies that the loader.conf default pattern selects at
+// least one entry. It returns a warning message, or "" when everything looks
+// fine. Patterns referencing no existing file are the classic "default boot
+// entry is broken" case that bootctl(1) prints a WARNING for.
+func CheckDefaultEntry(cfg *LoaderConfig, entries []*BootEntry) string {
+	if cfg == nil || cfg.Default == "" || DefaultSpecials[cfg.Default] {
+		return ""
+	}
+	for _, e := range entries {
+		if e.IsUKI {
+			continue // UKI auto-selection has its own ordering rules
+		}
+		if MatchEntryID(cfg.Default, e.FullID()) {
+			return ""
+		}
+	}
+	msg := fmt.Sprintf("default %q matches no boot entry — systemd-boot falls back to the newest entry", cfg.Default)
+	if !strings.Contains(cfg.Default, ".") && !strings.ContainsAny(cfg.Default, "*?[") {
+		msg += ` (entry IDs include the .conf suffix, e.g. "` + cfg.Default + `.conf")`
+	}
+	return msg
 }
