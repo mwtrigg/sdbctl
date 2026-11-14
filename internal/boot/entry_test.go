@@ -167,6 +167,47 @@ func TestParseEntriesNonExistent(t *testing.T) {
 	}
 }
 
+// TestParseTestdata parses the sample ESP layout shipped in testdata/ — a
+// cheap regression fixture covering multi-initrd entries and an "efi"
+// chainload entry.
+func TestParseTestdata(t *testing.T) {
+	esp := filepath.Join("..", "..", "testdata")
+
+	cfg, err := ParseLoaderConf(filepath.Join(esp, "loader", "loader.conf"))
+	if err != nil {
+		t.Fatalf("sample loader.conf must parse: %v", err)
+	}
+	if len(cfg.Issues) > 0 {
+		t.Errorf("sample loader.conf has issues: %v", cfg.Issues)
+	}
+
+	entries, err := ParseAllEntries(esp)
+	if err != nil {
+		t.Fatalf("sample entries must parse: %v", err)
+	}
+
+	var windows *BootEntry
+	byID := map[string]*BootEntry{}
+	for _, e := range entries {
+		byID[e.ID] = e
+		if e.Efi != "" {
+			windows = e
+		}
+	}
+	if windows == nil {
+		t.Fatal("no efi-key entry found in testdata")
+	}
+	if len(windows.ImageKeys()) != 1 {
+		t.Errorf("windows entry image keys: %v", windows.ImageKeys())
+	}
+	if got := byID["fedora"]; got == nil || len(got.Initrds) != 2 {
+		t.Errorf("fedora entry should carry two initrds: %+v", got)
+	}
+	if !MatchEntryID(cfg.Default, byID["arch"].FullID()) {
+		t.Errorf("sample default %q should select the arch entry", cfg.Default)
+	}
+}
+
 func TestWriteEntry(t *testing.T) {
 	entry := &BootEntry{
 		Title:      "Test Write",

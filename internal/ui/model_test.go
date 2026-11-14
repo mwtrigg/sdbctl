@@ -123,3 +123,37 @@ func TestDiagnosticsOverlayAndArrows(t *testing.T) {
 		t.Error("right arrow did not switch panes")
 	}
 }
+
+func TestRealDiscoveryAgainstTestdata(t *testing.T) {
+	esp := filepath.Join("..", "..", "testdata")
+	m := New(WithESPPath(esp))
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 50})
+
+	msg := discoverBoot(esp)
+	if e, isErr := msg.(errMsg); isErr {
+		t.Fatalf("discovery failed: %v", e.err)
+	}
+	m.Update(msg)
+
+	if m.err != nil {
+		t.Fatalf("model error after load: %v", m.err)
+	}
+	if len(m.entries) != 4 {
+		t.Errorf("expected 4 entries, got %d", len(m.entries))
+	}
+	out := m.View()
+	for _, want := range []string{"Arch Linux", "Windows Boot Manager", "Loader"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("view missing %q", want)
+		}
+	}
+	// testdata kernel/initrd paths do not exist on disk, so entries must be
+	// flagged and diagnostics must render without panicking.
+	if len(m.entryWarnings) == 0 {
+		t.Error("expected validation warnings for nonexistent testdata files")
+	}
+	m.showDiag = true
+	if !strings.Contains(m.View(), "diagnostics") && !strings.Contains(m.View(), "Diagnostics") {
+		t.Error("diagnostics overlay did not render")
+	}
+}
