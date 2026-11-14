@@ -50,7 +50,14 @@ which is useful for exercising the validation paths.
    that matches nothing, dropped comments, EFI variable format) needs a test
    before it ships. `internal/ui/model_test.go` shows the pattern for
    headless model testing.
-4. Release flow: tag `vX.Y.Z` and push — `.github/workflows/release.yml` +
+4. Destructive changes must be snapshotted first — use
+   `model.backupBefore()` (see `internal/boot/backup.go`) so `u` and
+   `--restore` can roll them back. Never write a file the user did not ask
+   to change.
+5. The README screenshots are generated, not hand-made:
+   `make screenshots` (needs `pip install pyte` and a Chrome binary) renders
+   the real binary in a pseudo-terminal. Re-run it when the UI changes.
+6. Release flow: tag `vX.Y.Z` and push — `.github/workflows/release.yml` +
    GoReleaser build the binaries and GitHub release. `AppVersion` is
    overridden at build time via ldflags; the value in `styles.go` is only a
    fallback.

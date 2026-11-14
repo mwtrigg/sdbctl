@@ -11,7 +11,7 @@ A terminal UI for managing systemd-boot — browse, create, edit, and delete boo
 Before using, understand the following risks:
 
 - **System may become unbootable** — incorrect paths for `linux`, `initrd`, or `efi` fields, or deleting a critical entry, can prevent your system from booting. The tool validates that referenced files exist and flags entries systemd-boot would hide — but always double-check paths against what actually exists on your ESP.
-- **No undo** — file writes and deletions are immediate and permanent. There is no backup or undo functionality. Writes are atomic (temp file + `fsync` + rename, including directory sync for FAT32 durability), so an interrupted write can never leave a half-written file — but overwrites are still overwrites.
+- **Every change is snapshotted, but backups are not a substitute for care** — before writing or deleting anything, sdboot-tui copies the affected file to `<boot-dir>/loader/sdboot-tui-backups/<timestamp>/`. Press `u` (or run `sdboot-tui --restore`) to roll back. Writes are atomic (temp file + `fsync` + rename, including directory sync for FAT32 durability), so an interrupted write can never leave a half-written file.
 - **Kernel command-line exposure** — the `options` field is passed directly to the kernel at boot. Mistakes here (e.g. wrong `root=` UUID) will cause boot failure or unintended kernel behaviour. sdboot-tui warns when a kernel entry has no `root=` parameter at all.
 - **ESP filesystem corruption** — the ESP is a FAT32 partition. Interrupted *mount-level* operations can corrupt it. Do not run this tool on an unstable system or over an unreliable connection.
 - **EFI variable modification** — the one-shot boot feature writes EFI NVRAM variables directly. Interrupting an EFI variable write on some firmware implementations can leave the variable store in an inconsistent state.
@@ -22,16 +22,21 @@ Before using, understand the following risks:
 ## Screenshots
 
 ![Main view — entries list, detail pane, and loader pane](assets/01_MainScreen.png)
-*Main view*
+*Main view — entry badges: `[★]` default, `[!]` hidden entry, `[UKI]` unified kernel image*
 
 ![Edit mode — field-by-field editing with tab completion dropdown](assets/02_EditEntryTabCompletion.png)
-*Editing a boot entry*
+*Editing a boot entry — path completion for kernel/initrd/EFI paths*
 
 ![Save confirmation diff — changes shown before writing to disk](assets/03_SaveConfirmationDiff.png)
 *Save confirmation with diff view*
 
-![ESP validation warning — [!] badge and missing-file errors](assets/04_EFI-Validation.png)
-*ESP validation warnings*
+![Validation warning — [!] badge and missing-file errors](assets/04_EFI-Validation.png)
+*An entry whose kernel is gone — systemd-boot would hide it from the menu*
+
+![Diagnostics overlay](assets/05_Diagnostics.png)
+*Diagnostics (`d`) — loader binaries, version drift, broken entries*
+
+<sub>All screenshots are generated from a synthetic sample ESP with `make screenshots`.</sub>
 
 ---
 
@@ -65,12 +70,18 @@ Before using, understand the following risks:
 - `d` opens a diagnostics overlay: XBOOTLDR vs ESP layout, presence and versions of `EFI/systemd/systemd-boot*.efi` and the `EFI/BOOT/BOOT*.EFI` fallback vs the packaged binary (`bootctl update` drift, Windows-update-overwritten fallback), active EFI-variable state
 - One-shot boot override: press `o` to set `LoaderEntryOneShot` for the selected entry (boots it once on next restart, then clears automatically; works for `.conf` entries and UKIs). Shows a `[1x]` badge. EFI systems only
 - `[★]` default badge matches `default=` globs the same way systemd-boot does (case-insensitive, full ID); `default @saved` highlights the last-booted entry via `LoaderEntryLastBooted` (`[●]` badge)
+- **Undo** — every write and delete is snapshotted to `<boot-dir>/loader/sdboot-tui-backups/<timestamp>/` first; press `u` to restore the last snapshot (the undo itself is snapshotted, so it is reversible)
 - Save confirmation with diff view
 - File preview overlay — raw `.conf` for any entry or `loader.conf`; UKIs show path/size metadata
 - Last-modified timestamp shown for entries and loader config
 - Context-sensitive help for each editable field
 - Keyboard navigation with arrow keys or `j`/`k`; `Tab`/`Shift+Tab`/`←`/`→` to switch panes
 - Nord color theme
+
+**Non-interactive mode**
+
+- `sdboot-tui --check` prints the same diagnostics as the `d` overlay as plain text and exits non-zero when problems are found — handy for installer scripts, CI, or a machine you cannot boot into
+- `sdboot-tui --restore` restores the most recent snapshot; `sdboot-tui --list-backups` lists what is available
 
 ## Requirements
 
@@ -98,10 +109,6 @@ go install github.com/mwtrigg/sdboot-tui@latest
 sudo mv "$(go env GOPATH)/bin/sdboot-tui" /usr/local/bin/
 ```
 
-### AUR
-
-Coming soon.
-
 ### From source
 
 Requires Go 1.24+.
@@ -120,6 +127,32 @@ sudo sdboot-tui [-esp /path/to/esp]
 ```
 
 Default boot-directory paths checked: `/boot`, `/boot/efi`, `/efi`
+
+### Non-interactive use
+
+```bash
+sdboot-tui --check                  # diagnostics report; exit 1 if problems were found
+sdboot-tui --restore                # roll back the most recent change
+sdboot-tui --list-backups           # list available snapshots
+sdboot-tui --version
+```
+
+`--check` never writes anything and does not need root:
+
+```console
+$ sdboot-tui --check -esp /boot
+sdboot-tui diagnostics
+  boot directory : /boot
+  loader        : /EFI/systemd/systemd-bootx64.efi (systemd-boot 259.1)
+  fallback      : /EFI/BOOT/BOOTX64.EFI
+  package       : systemd-boot 259.1
+...
+entries
+  old-kernel.conf
+    ! linux file not found: /arch/6.10.1-arch1-1/linux (entry hidden from boot menu)
+
+3 problem(s) found
+```
 
 ### Chroot / recovery environments
 
@@ -147,6 +180,7 @@ Without that, `efivars` will not be visible inside the chroot and the one-shot f
 | `D` | Delete selected entry |
 | `s` | Set selected entry as default |
 | `o` | Toggle one-shot boot (EFI only) |
+| `u` | Undo the last change (restore the last snapshot) |
 | `e` | Enter edit mode |
 | `↑`/`↓` | Navigate fields (in edit mode) |
 | `Tab` | Next field / path completion (in edit mode) |
@@ -188,7 +222,7 @@ The boot loader's own view is authoritative: run `bootctl status` and `bootctl l
 
 ## Known limitations
 
-- No undo/backup — save-confirmation diffs are the safety net; snapshot the ESP contents yourself if unsure (`cp -a /boot/efi/loader /tmp`)
+- Backups cover changes made through this tool, not changes made by your package manager or `kernel-install` — and they live on the boot partition (`loader/sdboot-tui-backups/`), so copy them elsewhere if the ESP itself is suspect
 - UKI files (`EFI/Linux/*.efi`) are listed, previewed as metadata, settable as default and one-shot, but not created or edited here — they are built by `kernel-install`/`ukify`
 - The entry list is shown in file-name order, not the boot menu's BLS sort order (sort-key/version); `bootctl list` shows the loader's own view
 - Boot loader installation (`bootctl install`/`update`) and firmware boot order management stay in `bootctl`'s hands — sdboot-tui tells you when they're needed
@@ -205,6 +239,8 @@ sdboot-tui/
 │   │   ├── loader.go       # loader.conf (lenient, round-trip preserving)
 │   │   ├── validate.go     # "will systemd-boot show this entry?" checks
 │   │   ├── diagnose.go     # ESP/loader layout + version inspection
+│   │   ├── report.go       # shared report for the overlay and --check
+│   │   ├── backup.go       # snapshots + restore
 │   │   ├── efivar.go       # LoaderEntryOneShot / LastBooted
 │   │   └── esp.go          # boot directory discovery
 │   └── ui/                 # Bubble Tea TUI
@@ -216,6 +252,7 @@ sdboot-tui/
 │       ├── pane_loader.go  # loader.conf view / edit pane
 │       ├── styles.go       # Lip Gloss styles (Nord palette)
 │       └── helpers.go      # Utility functions
+├── tools/screenshot.py     # regenerates the README screenshots (pty + pyte + Chrome)
 └── testdata/               # Sample ESP layout for tests
 ```
 
