@@ -63,6 +63,11 @@ type model struct {
 	// one-shot boot state
 	oneShotEntry string // entry token currently set for one-shot, or ""
 	oneShotAvail bool   // whether EFI variable interface is accessible
+	// lastBackup is the snapshot taken before the most recent change, so the
+	// change can be undone.
+	lastBackup *boot.Backup
+	// undoing is set while the undo confirmation is pending.
+	undoing bool
 	// host context for validation and diagnostics
 	machineID  string // local /etc/machine-id, "" if unknown
 	archToken  string // local EFI architecture token
@@ -234,6 +239,18 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Undo confirmation: y to restore the last snapshot.
+	if m.undoing {
+		switch msg.String() {
+		case "y", "Y":
+			m.undoing = false
+			m.undo()
+		default:
+			m.undoing = false
+		}
+		return m, nil
+	}
+
 	if m.editing {
 		return m.handleEditKey(msg)
 	}
@@ -272,6 +289,10 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "d":
 			m.showDiag = true
+		case "u":
+			if m.focused == paneEntries || m.focused == paneLoader {
+				m.undoing = true
+			}
 		case "o":
 			if m.focused == paneEntries && m.entry != nil && m.oneShotAvail {
 				m.toggleOneShot()
@@ -461,11 +482,94 @@ func (m *model) revalidateEntries() {
 	m.entryWarnings = warnings
 }
 
+// backupBefore snapshots the given boot-directory-relative files so that the
+// upcoming change can be undone. It returns false (and records the error) if
+// the snapshot failed, in which case the caller must not modify anything.
+func (m *model) backupBefore(relPaths ...string) bool {
+	b, err := boot.CreateBackup(m.espPath, relPaths)
+	if err != nil {
+		m.err = fmt.Errorf("backup failed, nothing was changed: %w", err)
+		return false
+	}
+	if b != nil {
+		m.lastBackup = b
+	}
+	return true
+}
+
+// undo restores the most recent backup, which reverts the last change made
+// through this tool (an edited entry, a deleted entry, an edited
+// loader.conf). The state before the undo is snapshotted again, so undoing is
+// itself reversible.
+func (m *model) undo() {
+	b, err := boot.LatestBackup(m.espPath)
+	if err != nil {
+		m.err = err
+		return
+	}
+	if b == nil {
+		m.err = fmt.Errorf("no backups to restore")
+		return
+	}
+
+	// Snapshot the current state first so the undo can be undone.
+	current := make([]string, 0, len(b.Files))
+	for _, rel := range b.Files {
+		current = append(current, rel)
+	}
+	if !m.backupBefore(current...) {
+		return
+	}
+
+	if err := boot.RestoreBackup(m.espPath, *b); err != nil {
+		m.err = err
+		return
+	}
+	m.reload()
+}
+
+// reload re-reads the boot configuration from disk (after an undo or an
+// external change).
+func (m *model) reload() {
+	entries, err := boot.ParseAllEntries(m.espPath)
+	if err != nil {
+		m.err = err
+		return
+	}
+	cfg, _ := boot.ParseLoaderConf(boot.FindLoaderConf(m.espPath))
+
+	// Keep the selection if the entry still exists.
+	selectedID := ""
+	if m.entry != nil {
+		selectedID = m.entry.ID
+	}
+	m.entries = entries
+	m.loaderConf = cfg
+	m.selected = 0
+	m.entry = nil
+	for i, e := range entries {
+		if e.ID == selectedID {
+			m.selected = i
+			m.entry = e
+			break
+		}
+	}
+	if m.entry == nil && len(entries) > 0 {
+		m.entry = entries[0]
+	}
+	m.refreshEntryMeta()
+	m.refreshLoaderMeta()
+	m.revalidateEntries()
+}
+
 func (m *model) saveEntry() {
 	if m.entry == nil {
 		return
 	}
 	path := filepath.Join(m.espPath, "loader", "entries", m.entry.ID+".conf")
+	if !m.backupBefore("loader/entries/" + m.entry.ID + ".conf") {
+		return
+	}
 	if err := m.entry.Write(path); err != nil {
 		m.err = err
 		return
@@ -523,7 +627,13 @@ func (m *model) toggleOneShot() {
 }
 
 func (m *model) saveLoaderConf() {
+	if m.loaderConf == nil {
+		return
+	}
 	path := filepath.Join(m.espPath, "loader", "loader.conf")
+	if !m.backupBefore("loader/loader.conf") {
+		return
+	}
 	if err := m.loaderConf.Write(path); err != nil {
 		m.err = err
 	}

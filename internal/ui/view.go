@@ -49,6 +49,10 @@ func (m *model) View() string {
 		return m.deleteConfirmOverlay()
 	}
 
+	if m.undoing {
+		return m.undoConfirmOverlay()
+	}
+
 	if m.showPreview {
 		return m.previewOverlay()
 	}
@@ -140,6 +144,31 @@ func (m *model) deleteConfirmOverlay() string {
 		fmt.Sprintf("  %s", ErrorStyle.Render(name)),
 		"",
 		HelpStyle.Render("  [y] delete   [any other key] cancel"),
+	)
+	modal := HelpModalStyle.Render(content)
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, modal)
+}
+
+func (m *model) undoConfirmOverlay() string {
+	desc := "no backups available"
+	if m.lastBackup != nil {
+		desc = m.lastBackup.Describe()
+	} else if b, err := boot.LatestBackup(m.espPath); err == nil && b != nil {
+		desc = b.Describe()
+	}
+	content := lipgloss.JoinVertical(lipgloss.Top,
+		HelpTitleStyle.Render(" Undo last change? "),
+		"",
+		fmt.Sprintf("  %s", HelpStyle.Render(desc)),
+		"",
+		HelpStyle.Render("  [y] restore   [any other key] cancel"),
 	)
 	modal := HelpModalStyle.Render(content)
 	w, h := m.width, m.height
@@ -256,6 +285,17 @@ func (m *model) diagOverlay() string {
 	b.WriteString("\n" + HelpStyle.Render(" Notes") + "\n")
 	wrap("· ", m.loaderInfo.BootHints()...)
 
+	if backups, err := boot.ListBackups(m.espPath); err == nil && len(backups) > 0 {
+		b.WriteString("\n" + HelpStyle.Render(" Backups") + "\n")
+		for i, bk := range backups {
+			if i >= 3 {
+				b.WriteString(" " + HelpStyle.Render(fmt.Sprintf("… %d older", len(backups)-3)) + "\n")
+				break
+			}
+			b.WriteString(" " + HelpStyle.Render(bk.Describe()) + "\n")
+		}
+	}
+
 	b.WriteString("\n" + HelpStyle.Render(" Press any key to close"))
 
 	modal := HelpModalStyle.Render(b.String())
@@ -285,6 +325,7 @@ func (m *model) helpOverlay() string {
 		"  D             Delete selected entry",
 		"  s             Set as default boot entry",
 		"  o             Toggle one-shot (next boot only, EFI systems)",
+		"  u             Undo last change (restore last snapshot)",
 		"  e             Toggle edit mode",
 		"  Enter         Save changes (in edit mode)",
 		"  Esc           Cancel editing / new entry",
@@ -322,22 +363,22 @@ func (m *model) helpBar() string {
 			return HelpStyle.Render(" ↑/↓: navigate  |  Tab: switch  |  Enter: save  |  Esc: cancel  |  ?: help")
 		}
 		if m.oneShotAvail {
-			return HelpStyle.Render(" ↑/↓: navigate  |  n: new  |  D: delete  |  s: set default  |  o: one-shot  |  d: diagnostics  |  Tab: switch  |  q: quit  |  ?: help")
+			return HelpStyle.Render(" ↑/↓ navigate | n new | D delete | s default | o one-shot | u undo | d diagnostics | Tab pane | ?: help")
 		}
-		return HelpStyle.Render(" ↑/↓: navigate  |  n: new  |  D: delete  |  s: set default  |  d: diagnostics  |  Tab: switch  |  q: quit  |  ?: help")
+		return HelpStyle.Render(" ↑/↓ navigate | n new | D delete | s default | u undo | d diagnostics | Tab pane | ?: help")
 	case paneDetail:
 		if m.editing {
 			return HelpStyle.Render(" ↑/↓: field  |  Tab: next/complete  |  Enter: save  |  Esc: cancel  |  ?: help")
 		}
 		if m.entry != nil && m.entry.IsUKI {
-			return HelpStyle.Render(" p: show image info  |  Tab: switch  |  q: quit  |  ?: help")
+			return HelpStyle.Render(" p: show image info  |  Tab: pane  |  q: quit  |  ?: help")
 		}
-		return HelpStyle.Render(" e: edit  |  p: preview file  |  Tab: switch  |  q: quit  |  ?: help")
+		return HelpStyle.Render(" e: edit  |  p: preview file  |  Tab: pane  |  q: quit  |  ?: help")
 	case paneLoader:
 		if m.editing {
 			return HelpStyle.Render(" e: stop  |  Tab: switch  |  Enter: save  |  Esc: cancel  |  ?: help")
 		}
-		return HelpStyle.Render(" e: edit  |  p: preview file  |  d: diagnostics  |  Tab: switch  |  q: quit  |  ?: help")
+		return HelpStyle.Render(" e: edit  |  p: preview file  |  d: diagnostics  |  Tab: pane  |  q: quit  |  ?: help")
 	}
 	return ""
 }

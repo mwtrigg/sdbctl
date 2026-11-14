@@ -157,3 +157,61 @@ func TestRealDiscoveryAgainstTestdata(t *testing.T) {
 		t.Error("diagnostics overlay did not render")
 	}
 }
+
+func TestUndoRestoresPreviousEntryContent(t *testing.T) {
+	m := loadedModel(t)
+
+	// Edit the arch entry's title and save it.
+	for i, e := range m.entries {
+		if e.ID == "arch" {
+			m.selected = i
+			m.entry = e
+		}
+	}
+	m.enterEntryEditMode()
+	m.editInput.SetValue("Arch Renamed") // as if the user typed it
+	m.prepareCommit()
+	m.finalizeCommit()
+
+	data, err := os.ReadFile(filepath.Join(m.espPath, "loader", "entries", "arch.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "Arch Renamed") {
+		t.Fatalf("edit not saved:\n%s", data)
+	}
+
+	// Undo must restore the previous content.
+	m.undo()
+	data, err = os.ReadFile(filepath.Join(m.espPath, "loader", "entries", "arch.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "Arch Renamed") {
+		t.Errorf("undo did not revert the edit:\n%s", data)
+	}
+	if !strings.Contains(string(data), "title Arch") {
+		t.Errorf("undo lost the original title:\n%s", data)
+	}
+}
+
+func TestDeleteIsUndoable(t *testing.T) {
+	m := loadedModel(t)
+	for i, e := range m.entries {
+		if e.ID == "windows" {
+			m.selected = i
+			m.entry = e
+		}
+	}
+	m.confirmDelete()
+
+	path := filepath.Join(m.espPath, "loader", "entries", "windows.conf")
+	if _, err := os.Stat(path); err == nil {
+		t.Fatal("entry was not deleted")
+	}
+
+	m.undo()
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("undo did not restore the deleted entry: %v", err)
+	}
+}

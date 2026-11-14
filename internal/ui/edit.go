@@ -80,6 +80,10 @@ func (m *model) confirmDelete() {
 		return
 	}
 	path := filepath.Join(m.espPath, "loader", "entries", m.entry.ID+".conf")
+	// Snapshot the entry first: deleting is undoable.
+	if !m.backupBefore("loader/entries/" + m.entry.ID + ".conf") {
+		return
+	}
 	if err := os.Remove(path); err != nil {
 		m.err = err
 		return
@@ -509,17 +513,26 @@ func (m *model) prepareCommit() {
 // finalizeCommit writes the confirmed draft to disk.
 func (m *model) finalizeCommit() {
 	m.editing = false
+	m.editInput.Blur()
 	m.confirming = false
 	m.editFields = nil
 	m.completions = nil
 	m.showCompletions = false
 	m.confirmDiff = nil
 
-	if m.focused == paneDetail {
+	// Which draft is active decides what gets written — not which pane
+	// happens to be focused.
+	switch {
+	case m.draftEntry != nil:
 		m.entry = m.draftEntry
 		m.entries[m.selected] = m.draftEntry // keep slice in sync
 		if m.creating {
 			path := filepath.Join(m.espPath, "loader", "entries", m.draftEntry.ID+".conf")
+			// A brand new file has nothing to snapshot, but an existing
+			// file with the same name would be overwritten.
+			if !m.backupBefore("loader/entries/" + m.draftEntry.ID + ".conf") {
+				return
+			}
 			if err := m.draftEntry.Write(path); err != nil {
 				m.err = err
 			}
@@ -529,7 +542,7 @@ func (m *model) finalizeCommit() {
 		}
 		m.draftEntry = nil
 		m.refreshEntryMeta()
-	} else {
+	case m.draftLoader != nil:
 		m.loaderConf = m.draftLoader
 		m.draftLoader = nil
 		m.saveLoaderConf()
@@ -556,7 +569,7 @@ func (m *model) buildDiff() []diffLine {
 		return "no"
 	}
 
-	if m.focused == paneDetail && m.entry != nil && m.draftEntry != nil {
+	if m.draftEntry != nil && m.entry != nil {
 		e, d := m.entry, m.draftEntry
 		add("title", e.Title, d.Title)
 		add("version", e.Version, d.Version)
@@ -573,7 +586,7 @@ func (m *model) buildDiff() []diffLine {
 		add("devicetree", e.Devicetree, d.Devicetree)
 		add("devicetree-overlay", strings.Join(e.DTOOverlays, ", "), strings.Join(d.DTOOverlays, ", "))
 		add("extra", strings.Join(e.Extras, ", "), strings.Join(d.Extras, ", "))
-	} else if m.focused == paneLoader && m.loaderConf != nil && m.draftLoader != nil {
+	} else if m.draftLoader != nil && m.loaderConf != nil {
 		l, d := m.loaderConf, m.draftLoader
 		add("timeout", l.Timeout, d.Timeout)
 		add("default", l.Default, d.Default)
@@ -616,6 +629,7 @@ func (m *model) cancelEdit() {
 	m.showCompletions = false
 	m.validationErr = ""
 	m.editing = false
+	m.editInput.Blur()
 	m.confirming = false
 	m.confirmDiff = nil
 }
