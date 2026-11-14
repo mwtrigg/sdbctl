@@ -267,7 +267,7 @@ def main():
     try:
         s = Session(cmd, args.cols, args.rows)
         s.pump(1.6)
-        shot(s, args.out, "01_MainScreen", esp, args.cols)
+        shot(s, args.out, "01-main-screen", esp, args.cols)
         s.send("q")
         s.proc.terminate()
 
@@ -281,7 +281,7 @@ def main():
         s.send("/arch")
         s.send("\t")                      # completion dropdown
         s.pump(0.5)
-        shot(s, args.out, "02_EditEntryTabCompletion", esp, args.cols)
+        shot(s, args.out, "02-edit-entry-tab-completion", esp, args.cols)
         s.send("q")
         s.proc.terminate()
 
@@ -293,7 +293,7 @@ def main():
         s.send("Arch Linux (custom)")
         s.send("\r")                      # confirmation diff
         s.pump(0.5)
-        shot(s, args.out, "03_SaveConfirmationDiff", esp, args.cols)
+        shot(s, args.out, "03-save-confirmation-diff", esp, args.cols)
         s.send("q")
         s.proc.terminate()
 
@@ -302,7 +302,7 @@ def main():
         for _ in range(3):                # select the stale entry
             s.send("j")
         s.pump(0.4)
-        shot(s, args.out, "04_EFI-Validation", esp, args.cols)
+        shot(s, args.out, "04-entry-validation", esp, args.cols)
         s.send("q")
         s.proc.terminate()
 
@@ -310,7 +310,7 @@ def main():
         s.pump(1.6)
         s.send("d")                       # diagnostics overlay
         s.pump(0.6)
-        shot(s, args.out, "05_Diagnostics", esp, args.cols)
+        shot(s, args.out, "05-boot-diagnostics", esp, args.cols)
         s.send("q")
         s.proc.terminate()
     finally:

@@ -21,19 +21,19 @@ Before using, understand the following risks:
 
 ## Screenshots
 
-![Main view — entries list, detail pane, and loader pane](assets/01_MainScreen.png)
+![Main view — entries list, detail pane, and loader pane](assets/01-main-screen.png)
 *Main view — entry badges: `[★]` default, `[!]` hidden entry, `[UKI]` unified kernel image*
 
-![Edit mode — field-by-field editing with tab completion dropdown](assets/02_EditEntryTabCompletion.png)
+![Edit mode — field-by-field editing with tab completion dropdown](assets/02-edit-entry-tab-completion.png)
 *Editing a boot entry — path completion for kernel/initrd/EFI paths*
 
-![Save confirmation diff — changes shown before writing to disk](assets/03_SaveConfirmationDiff.png)
+![Save confirmation diff — changes shown before writing to disk](assets/03-save-confirmation-diff.png)
 *Save confirmation with diff view*
 
-![Validation warning — [!] badge and missing-file errors](assets/04_EFI-Validation.png)
+![Validation warning — [!] badge and missing-file errors](assets/04-entry-validation.png)
 *An entry whose kernel is gone — systemd-boot would hide it from the menu*
 
-![Diagnostics overlay](assets/05_Diagnostics.png)
+![Diagnostics overlay](assets/05-boot-diagnostics.png)
 *Diagnostics (`d`) — loader binaries, version drift, broken entries*
 
 <sub>All screenshots are generated from a synthetic sample ESP with `make screenshots`.</sub>
