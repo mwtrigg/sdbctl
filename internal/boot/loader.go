@@ -58,6 +58,10 @@ func defaultLoaderConfig() *LoaderConfig {
 	}
 }
 
+// NewLoaderConfig returns a configuration holding systemd-boot's documented
+// defaults, used when loader.conf does not exist yet.
+func NewLoaderConfig() *LoaderConfig { return defaultLoaderConfig() }
+
 func ParseLoaderConf(path string) (*LoaderConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

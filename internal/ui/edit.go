@@ -9,7 +9,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mwtrigg/sdboot-tui/internal/boot"
+	"github.com/mwtrigg/sdbctl/internal/boot"
 )
 
 // fieldDesc describes one editable field in a boot entry or loader config.

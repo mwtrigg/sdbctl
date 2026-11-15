@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Boot oracle: verify sdboot-tui's predictions against the real boot loader.
+"""Boot oracle: verify sdbctl's predictions against the real boot loader.
 
-sdboot-tui claims to know which entries systemd-boot will show and which it
+sdbctl claims to know which entries systemd-boot will show and which it
 will hide. That claim can only be checked by *running systemd-boot*. This
 script does it without installing an operating system:
 
   1. build a synthetic ESP from a table of probe entries
-  2. ask sdboot-tui --check what it predicts for each probe
+  2. ask sdbctl list --json what it predicts for each probe
   3. boot the packaged systemd-boot binary under qemu + OVMF with
      `timeout menu-force`, and capture the menu as text (EDK2 redirects the
      EFI console to the serial port when there is no VGA device)
@@ -21,6 +21,7 @@ Usage:
     python3 tools/bootoracle.py --verbose
 """
 import argparse
+import json
 import os
 import re
 import shutil
@@ -66,13 +67,6 @@ LOADER_CANDIDATES = [
     "/usr/lib64/systemd/boot/efi/systemd-bootx64.efi",
     "/lib/systemd/boot/efi/systemd-bootx64.efi",
 ]
-
-HIDE_MARKERS = (
-    "hidden from boot menu",
-    "ignores this entry",
-    "drops this entry",
-)
-
 
 def die(msg):
     sys.exit(f"bootoracle: {msg}")
@@ -129,22 +123,27 @@ def fill_image(stage, img, mnt):
 
 
 def predictions(bin_path, esp, verbose):
-    """Run sdboot-tui --check and return {probe_id: predicted_hidden}."""
-    out = subprocess.run([bin_path, "--check", "-esp", esp],
+    """Ask sdbctl what it predicts for each entry and return the hidden set.
+
+    The machine-readable listing is used on purpose: the prose in the
+    diagnostics changes with the wording, the `hidden` flag does not.
+    """
+    out = subprocess.run([bin_path, "list", "--json", "--esp", esp],
                          capture_output=True, text=True).stdout
-    hidden = set()
-    current = None
-    for line in out.splitlines():
-        m = re.match(r"^  ([a-z0-9_-]+)\.conf$", line)
-        if m:
-            current = m.group(1)
-            continue
-        if current and line.startswith("    ! ") and any(k in line for k in HIDE_MARKERS):
-            hidden.add(current)
-            current = None
     if verbose:
         print(out)
-    return hidden
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError as e:
+        die(f"could not parse `sdbctl list --json` output: {e}\n{out}")
+
+    hidden = set()
+    titles = {}
+    for entry in data.get("entries", []):
+        titles[entry.get("title", "")] = entry.get("fullId", "")
+        if entry.get("hidden"):
+            hidden.add(entry.get("fullId", ""))
+    return hidden, titles
 
 
 def _as_text(p):
@@ -200,7 +199,7 @@ def boot_menu(qemu_timeout):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bin", default=None, help="path to the sdboot-tui binary")
+    ap.add_argument("--bin", default=None, help="path to the sdbctl binary")
     ap.add_argument("--loader", default=None, help="systemd-boot EFI binary to boot")
     ap.add_argument("--timeout", type=int, default=75, help="qemu wall-clock budget (s)")
     ap.add_argument("--verbose", action="store_true")
@@ -208,7 +207,7 @@ def main():
     args = ap.parse_args()
 
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    bin_path = args.bin or os.path.join(repo, "sdboot-tui")
+    bin_path = args.bin or os.path.join(repo, "sdbctl")
     if not os.path.exists(bin_path):
         die(f"{bin_path} not found — run `make build` first")
 
@@ -237,7 +236,7 @@ def main():
     mnt = os.path.join(work, "mnt")
     subprocess.run(["sudo", "mount", "-o", "loop", img, mnt], check=True)
     try:
-        predicted = predictions(bin_path, mnt, args.verbose)
+        predicted, _titles = predictions(bin_path, mnt, args.verbose)
     finally:
         subprocess.run(["sudo", "umount", mnt], check=True)
 
@@ -251,7 +250,7 @@ def main():
     print("-" * 84)
     failures = 0
     for pid, _title, _body, note in PROBES:
-        pred = "hidden" if pid in predicted else "shown"
+        pred = "hidden" if pid+".conf" in predicted else "shown"
         act = "hidden" if pid in hidden_actual else "shown"
         ok = pred == act
         if not ok:

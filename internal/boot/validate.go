@@ -188,6 +188,33 @@ func ValidateEntry(entry *BootEntry, ctx ValidationContext) *ValidationError {
 	return nil
 }
 
+// IsHiddenIssue reports whether a validation issue means systemd-boot will
+// not show the entry at all, as opposed to warning about its contents. The
+// CLI, the MCP server and the qemu oracle all key off this instead of
+// matching on message text.
+func IsHiddenIssue(issue string) bool {
+	for _, marker := range []string{
+		"hidden from boot menu",
+		"ignores this entry",
+		"drops this entry",
+	} {
+		if strings.Contains(issue, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// EntryHidden reports whether any of an entry's issues hide it from the menu.
+func EntryHidden(issues []string) bool {
+	for _, i := range issues {
+		if IsHiddenIssue(i) {
+			return true
+		}
+	}
+	return false
+}
+
 // hasOption reports whether any options line contains a parameter "name="
 // (comparison is case-sensitive, kernel parameters are).
 func hasOption(entry *BootEntry, name string) bool {

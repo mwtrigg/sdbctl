@@ -51,13 +51,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: install qemu, OVMF and dosfstools
+      - name: install qemu, OVMF, dosfstools and systemd-boot
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86 qemu-utils ovmf dosfstools systemd-boot-efi
 
       - name: build
-        run: go build -o sdboot-tui .
+        run: go build -o sdbctl .
 
       - name: run oracle
         run: python3 tools/bootoracle.py --verbose

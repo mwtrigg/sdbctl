@@ -1,6 +1,6 @@
 # Compiled binary
-sdboot-tui
-sdboot-tui-*
+sdbctl
+sdbctl-*
 
 # Go build artifacts
 *.test
@@ -14,3 +14,7 @@ sdboot-tui-*
 *~
 .idea/
 .vscode/
+
+# Python caches from the tools/ scripts
+__pycache__/
+*.pyc

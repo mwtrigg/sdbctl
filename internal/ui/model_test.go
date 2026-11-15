@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mwtrigg/sdboot-tui/internal/boot"
+	"github.com/mwtrigg/sdbctl/internal/boot"
 )
 
 func newBootTestdata(t *testing.T) string {

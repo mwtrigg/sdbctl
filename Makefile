@@ -1,10 +1,11 @@
-BINARY    := sdboot-tui
+BINARY    := sdbctl
 PREFIX    ?= /usr/local
 BINDIR    := $(PREFIX)/bin
 
 # Version from git tag, falling back to "dev"
 VERSION   := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS   := -s -w -X github.com/mwtrigg/sdboot-tui/internal/ui.AppVersion=$(VERSION)
+LDFLAGS   := -s -w -X github.com/mwtrigg/sdbctl/internal/ui.AppVersion=$(VERSION) \
+	-X github.com/mwtrigg/sdbctl/internal/cli.Version=$(VERSION)
 
 .PHONY: build install uninstall test clean screenshots
 
