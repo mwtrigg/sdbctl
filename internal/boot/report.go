@@ -57,6 +57,7 @@ func BuildReport(bootDir string) (*Report, error) {
 		ESPPath:      bootDir,
 		MachineID:    r.MachineID,
 		Architecture: r.ArchToken,
+		LoaderMajor:  r.Loader.MajorVersion(),
 	}
 	for _, e := range entries {
 		if e.IsUKI {

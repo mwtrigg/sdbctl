@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: build + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "not gofmt-clean:"; echo "$out"; exit 1
+          fi
+
+      - name: vet
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
+      # Includes the fuzz seed corpus, which is where parser regressions show
+      # up first. Deeper fuzzing runs locally with -fuzz.
+      - name: test
+        run: go test ./...
+
+  boot-oracle:
+    # Verify sdboot-tui's "will systemd-boot show this entry?" predictions
+    # against the real boot loader, booted under qemu + OVMF.
+    name: boot loader oracle (qemu + OVMF)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: install qemu, OVMF and dosfstools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils ovmf dosfstools
+
+      - name: build
+        run: go build -o sdboot-tui .
+
+      - name: run oracle
+        run: python3 tools/bootoracle.py --verbose

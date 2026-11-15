@@ -181,7 +181,7 @@ func (c *LoaderConfig) writeStandard() []byte {
 	for _, kv := range c.valueMap() {
 		lines = append(lines, kv.Key+" "+kv.Value)
 	}
-	return []byte(strings.Join(lines, "\n") + "\n")
+	return []byte(strings.Join(trimTrailingBlanks(lines), "\n") + "\n")
 }
 
 func (c *LoaderConfig) writeWithRawLines() []byte {
@@ -230,7 +230,7 @@ func (c *LoaderConfig) writeWithRawLines() []byte {
 		}
 	}
 
-	return []byte(strings.Join(lines, "\n") + "\n")
+	return []byte(strings.Join(trimTrailingBlanks(lines), "\n") + "\n")
 }
 
 // valueMap returns non-empty current values in canonical key order. Bool

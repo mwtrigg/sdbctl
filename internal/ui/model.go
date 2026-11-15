@@ -470,6 +470,7 @@ func (m *model) revalidateEntries() {
 		ESPPath:      m.espPath,
 		MachineID:    m.machineID,
 		Architecture: m.archToken,
+		LoaderMajor:  m.loaderInfo.MajorVersion(),
 	}
 	for _, e := range m.entries {
 		if e.IsUKI {

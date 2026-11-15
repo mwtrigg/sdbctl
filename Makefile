@@ -27,3 +27,9 @@ clean:
 # Chrome/Chromium binary; see tools/screenshot.py.
 screenshots: build
 	python3 tools/screenshot.py --out assets
+
+# Verify sdboot-tui's show/hide predictions against the real systemd-boot,
+# booted under qemu+OVMF with a synthetic ESP. Needs qemu, OVMF, dosfstools,
+# sudo and the packaged systemd-boot EFI binary; see tools/bootoracle.py.
+boot-oracle: build
+	python3 tools/bootoracle.py

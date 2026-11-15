@@ -11,7 +11,10 @@ import (
 func writeFakeESP(t *testing.T) string {
 	t.Helper()
 	esp := t.TempDir()
-	for _, p := range []string{"/vmlinuz", "/initramfs-linux.img", "/EFI/Microsoft/Boot/bootmgfw.efi"} {
+	for _, p := range []string{
+		"/vmlinuz", "/initramfs-linux.img",
+		"/EFI/Microsoft/Boot/bootmgfw.efi", "/EFI/Tools/tool.efi",
+	} {
 		full := filepath.Join(esp, filepath.FromSlash(p))
 		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
 			t.Fatal(err)
@@ -249,6 +252,113 @@ func TestLocalArchTokenMatchesGoArch(t *testing.T) {
 	case "arm64":
 		if LocalArchToken() != "aa64" {
 			t.Errorf("arm64 token: %q", LocalArchToken())
+		}
+	}
+}
+
+// The behaviour of an entry with two image keys depends on the boot loader
+// version, so the warning has to as well. Verified against the sources of
+// v255/v257/v258/v259 and an OVMF boot of v255 (tools/bootoracle.py).
+
+func conflictIssues(ctx ValidationContext) string {
+	e := &BootEntry{ID: "dual", Linux: "/vmlinuz", Efi: "/EFI/Tools/tool.efi"}
+	verr := ValidateEntry(e, ctx)
+	if verr == nil {
+		return ""
+	}
+	for _, i := range verr.Issues {
+		if strings.Contains(i, "conflicting image keys") {
+			return i
+		}
+	}
+	return ""
+}
+
+func TestValidateEntryConflictWordingIsVersionAware(t *testing.T) {
+	esp := writeFakeESP(t)
+
+	old := conflictIssues(ValidationContext{ESPPath: esp, LoaderMajor: 255})
+	if !strings.Contains(old, "boots the last of them") {
+		t.Errorf("v255 wording wrong: %q", old)
+	}
+
+	newer := conflictIssues(ValidationContext{ESPPath: esp, LoaderMajor: 258})
+	if !strings.Contains(newer, "drops this entry") {
+		t.Errorf("v258 wording wrong: %q", newer)
+	}
+
+	unknown := conflictIssues(ValidationContext{ESPPath: esp})
+	if !strings.Contains(unknown, "258 and newer") {
+		t.Errorf("unknown-version wording wrong: %q", unknown)
+	}
+}
+
+func TestValidateEntryUKIKeyNeedsNewLoader(t *testing.T) {
+	esp := writeFakeESP(t)
+	e := &BootEntry{ID: "uki", UKI: "/EFI/Tools/tool.efi"}
+
+	// v255 does not know the uki key at all: the entry has no recognised
+	// image source and is dropped.
+	issues := entryIssues(t, e, ValidationContext{ESPPath: esp, LoaderMajor: 255})
+	found := false
+	for _, i := range issues {
+		if strings.Contains(i, "uki/uki-url is unknown to systemd-boot 255") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected uki-too-old issue, got %v", issues)
+	}
+
+	// v258 understands it: only the root= style warnings remain.
+	issues = entryIssues(t, e, ValidationContext{ESPPath: esp, LoaderMajor: 258})
+	for _, i := range issues {
+		if strings.Contains(i, "uki") {
+			t.Errorf("v258 should accept uki, got %q", i)
+		}
+	}
+}
+
+func TestValidateEntryExtraNeedsNewLoader(t *testing.T) {
+	esp := writeFakeESP(t)
+	cred := filepath.Join(esp, "creds", "foo.cred")
+	if err := os.MkdirAll(filepath.Dir(cred), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cred, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	e := &BootEntry{ID: "x", Linux: "/vmlinuz", Options: []string{"root=/dev/sda1"},
+		Extras: []string{"/creds/foo.cred"}}
+
+	issues := entryIssues(t, e, ValidationContext{ESPPath: esp, LoaderMajor: 260})
+	found := false
+	for _, i := range issues {
+		if strings.Contains(i, "extra files are ignored by systemd-boot 260") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected extra-too-old issue, got %v", issues)
+	}
+
+	if issues := entryIssues(t, e, ValidationContext{ESPPath: esp, LoaderMajor: 261}); issues != nil {
+		t.Errorf("v261 should accept extra, got %v", issues)
+	}
+}
+
+func TestParseMajorVersion(t *testing.T) {
+	tests := map[string]int{
+		"259.1":                            259,
+		"255.4-1ubuntu8.15pop0~1778766128": 255,
+		"258":                              258,
+		"258-rc3":                          258,
+		"":                                 0,
+		"unknown":                          0,
+	}
+	for in, want := range tests {
+		if got := parseMajorVersion(in); got != want {
+			t.Errorf("parseMajorVersion(%q) = %d, want %d", in, got, want)
 		}
 	}
 }
