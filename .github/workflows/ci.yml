@@ -4,6 +4,9 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Manual runs: the boot oracle is worth running on demand, on a branch
+  # whose push did not trigger the workflow.
+  workflow_dispatch:
 
 permissions:
   contents: read
