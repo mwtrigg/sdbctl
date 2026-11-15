@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mwtrigg/sdboot-tui/internal/boot"
+	"github.com/mwtrigg/sdbctl/internal/boot"
 )
 
 type pane int
@@ -470,6 +470,7 @@ func (m *model) revalidateEntries() {
 		ESPPath:      m.espPath,
 		MachineID:    m.machineID,
 		Architecture: m.archToken,
+		LoaderMajor:  m.loaderInfo.MajorVersion(),
 	}
 	for _, e := range m.entries {
 		if e.IsUKI {

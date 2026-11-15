@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mwtrigg/sdboot-tui/internal/boot"
+	"github.com/mwtrigg/sdbctl/internal/boot"
 )
 
 func (m *model) loaderPane(width int) string {

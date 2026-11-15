@@ -34,7 +34,7 @@ func TestCreateBackupAndRestore(t *testing.T) {
 	if strings.HasPrefix(b.Path, entriesDir) {
 		t.Errorf("backup stored inside loader/entries: %s", b.Path)
 	}
-	if _, err := os.Stat(filepath.Join(esp, "loader", "sdboot-tui-backups")); err != nil {
+	if _, err := os.Stat(filepath.Join(esp, "loader", "sdbctl-backups")); err != nil {
 		t.Errorf("expected backup root: %v", err)
 	}
 
@@ -154,15 +154,14 @@ func TestBuildReport(t *testing.T) {
 	if report.OK() {
 		t.Error("expected problems (missing kernel file)")
 	}
-	if len(report.EntryIssues["arch"]) == 0 {
-		t.Errorf("expected entry issues, got %v", report.EntryIssues)
+	if !EntryHidden(report.EntryIssues["arch"]) {
+		t.Errorf("expected the missing kernel to hide the entry: %v", report.EntryIssues["arch"])
 	}
-
-	text := report.Text()
-	for _, want := range []string{"sdboot-tui diagnostics", "boot directory", "loader.conf", "missing-kernel", "problem(s) found"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("report text missing %q:\n%s", want, text)
-		}
+	if report.IssueCount() == 0 {
+		t.Error("IssueCount should be non-zero")
+	}
+	if report.LoaderConf == nil || report.LoaderConf.Default != "arch.conf" {
+		t.Errorf("loader.conf not picked up: %+v", report.LoaderConf)
 	}
 }
 

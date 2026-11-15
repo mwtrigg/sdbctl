@@ -172,6 +172,26 @@ func InspectLoader(bootDir string) LoaderStatus {
 	return st
 }
 
+// MajorVersion returns the systemd major version of the boot loader binary
+// found on the ESP (0 when unknown), e.g. "255.4-1ubuntu8.15" → 255.
+func (st LoaderStatus) MajorVersion() int {
+	return parseMajorVersion(st.LoaderVersion)
+}
+
+// parseMajorVersion extracts the leading integer from a systemd version
+// string ("259.1", "255.4-1ubuntu8", "258-rc3"). Returns 0 when unparseable.
+func parseMajorVersion(v string) int {
+	n := 0
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		if c < '0' || c > '9' {
+			break
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
+}
+
 // BootHints returns environment notes worth surfacing in diagnostics, e.g.
 // the XBOOTLDR/fast-boot caveat that makes perfectly valid entries vanish on
 // some firmware.

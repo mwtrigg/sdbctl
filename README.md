@@ -1,28 +1,197 @@
-# sdboot-tui
+# sdbctl
 
-A terminal UI for managing systemd-boot — browse, create, edit, and delete boot entries and loader configuration without touching config files directly.
+Control systemd-boot from the command line — inspect what will boot, flip to another distro for the next restart, and find out *why* an entry is not showing up.
 
----
-
-## ⚠️ Security and Safety Warning
-
-**This tool requires root (`sudo`) access and writes directly to your EFI System Partition.**
-
-Before using, understand the following risks:
-
-- **System may become unbootable** — incorrect paths for `linux`, `initrd`, or `efi` fields, or deleting a critical entry, can prevent your system from booting. The tool validates that referenced files exist and flags entries systemd-boot would hide — but always double-check paths against what actually exists on your ESP.
-- **Every change is snapshotted, but backups are not a substitute for care** — before writing or deleting anything, sdboot-tui copies the affected file to `<boot-dir>/loader/sdboot-tui-backups/<timestamp>/`. Press `u` (or run `sdboot-tui --restore`) to roll back. Writes are atomic (temp file + `fsync` + rename, including directory sync for FAT32 durability), so an interrupted write can never leave a half-written file.
-- **Kernel command-line exposure** — the `options` field is passed directly to the kernel at boot. Mistakes here (e.g. wrong `root=` UUID) will cause boot failure or unintended kernel behaviour. sdboot-tui warns when a kernel entry has no `root=` parameter at all.
-- **ESP filesystem corruption** — the ESP is a FAT32 partition. Interrupted *mount-level* operations can corrupt it. Do not run this tool on an unstable system or over an unreliable connection.
-- **EFI variable modification** — the one-shot boot feature writes EFI NVRAM variables directly. Interrupting an EFI variable write on some firmware implementations can leave the variable store in an inconsistent state.
-- **Supply chain risk** — running any tool as root that was downloaded from the internet carries inherent risk. Review the source code before use, or build from source on a trusted machine.
+`sdbctl` is CLI-first: every operation is a verb with machine-readable output, so it works the same in a shell, in a script, and from an agent. A full-screen editor is still there (`sdbctl edit`) for the things a terminal UI is better at.
 
 ---
 
-## Screenshots
+## ⚠️ Safety
+
+**Changing boot settings requires root (`sudo`) and writes to your EFI System Partition.**
+
+- **System may become unbootable** — a wrong `linux`/`efi` path or a deleted entry can stop the machine from booting. sdbctl validates that referenced files exist and flags the entries systemd-boot will hide, but always check paths against what is really on your ESP.
+- **Every change is snapshotted** — before anything is written or deleted, the affected file is copied to `<boot-dir>/loader/sdbctl-backups/<timestamp>/`. `sdbctl undo` rolls back; `sdbctl snapshots` lists them.
+- **Writes are atomic** (temp file, `fsync`, rename, directory sync) so an interrupted write cannot leave a half-written file — but an overwrite is still an overwrite.
+- **Kernel command lines are passed straight to the kernel** — a wrong `root=` UUID means an unbootable machine. Entries without `root=` are flagged.
+- **EFI variables** — the one-shot feature writes NVRAM directly. On some firmware an interrupted variable write can leave the variable store inconsistent.
+- **Supply chain** — review the source, or build it yourself on a machine you trust.
+
+---
+
+## Install
+
+```bash
+# pre-built binary
+sudo eget mwtrigg/sdbctl --to /usr/local/bin/
+
+# from source (Go 1.24+)
+go install github.com/mwtrigg/sdbctl@latest
+# or
+git clone https://github.com/mwtrigg/sdbctl && cd sdbctl && make install
+```
+
+Shell completions:
+
+```bash
+sdbctl completion bash > /etc/bash_completion.d/sdbctl
+sdbctl completion zsh  > "${fpath[1]}/_sdbctl"
+sdbctl completion fish > ~/.config/fish/completions/sdbctl.fish
+```
+
+---
+
+## Quick start
+
+```console
+$ sdbctl
+boot directory  /boot
+loader          /EFI/systemd/systemd-bootx64.efi  (systemd-boot 259.1)
+package         systemd-boot 259.1
+default         arch.conf
+timeout         5
+
+  arch-lts.conf      Arch Linux (LTS)         6.6.87-arch1-1
+* arch.conf          Arch Linux               6.12.8-arch1-1
+  fedora.conf        Fedora Linux 42          6.12.8-200.fc42.x86_64
+! old-kernel.conf    Arch Linux (old)         6.10.1-arch1-1
+    linux file not found: /arch/6.10.1-arch1-1/linux (entry hidden from boot menu)
+! windows.conf       Windows Boot Manager     11
+    efi file not found: /EFI/Microsoft/Boot/bootmgfw.efi (entry hidden from boot menu)
+```
+
+Flip to the other distro for the next restart, and go there now:
+
+```console
+$ sudo sdbctl boot fedora.conf --reboot
+one-shot set
+  entry      fedora.conf  Fedora Linux 42
+  next boot  Fedora Linux 42
+  rebooting now
+```
+
+Make it permanent, remember the last choice, or set the timeout:
+
+```console
+$ sudo sdbctl default fedora.conf
+$ sudo sdbctl default @saved
+$ sudo sdbctl timeout 3
+```
+
+---
+
+## Commands
+
+| Verb | What it does |
+|------|--------------|
+| *(none)*, `status` | Boot status: what will boot, what is set for next time, what is broken |
+| `list` | One line per entry; `--ids` prints bare IDs, `--json` prints JSON |
+| `boot <entry>` | Boot an entry once on the next restart; `--reboot` restarts now |
+| `default <entry>` | Set the persistent default entry (or `@saved`) |
+| `timeout <value>` | Menu timeout: seconds, `menu-force`, `menu-hidden`, `menu-disabled` |
+| `set <key> <value>` | Set any `loader.conf` option; an empty value clears it |
+| `rm <entry>` | Delete an entry (snapshotted first, so it is undoable) |
+| `undo` | Restore the most recent snapshot |
+| `snapshots` | List snapshots |
+| `recommend <goal>` | Suggest the commands for a goal ("boot fedora once"); never changes anything |
+| `check` | Full diagnostics; **exit 1 when problems were found** |
+| `edit`, `-e` | Launch the full-screen editor |
+| `mcp` | Serve the same operations over stdio as an MCP server |
+| `completion <shell>` | Print a completion script (bash, zsh, fish) |
+| `version`, `help` | Version, usage |
+
+Global flags: `--esp PATH`, `--json`, `--dry-run`, `--force`, `--yes`, `--quiet`.
+
+Entries can be named by ID (`fedora`), full ID (`fedora.conf`), or glob (`fedora-*`); ambiguous globs are refused with the candidates listed.
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | An operation failed, or `check` found problems |
+| 2 | Bad command line |
+
+---
+
+## Machine-readable output
+
+Every verb accepts `--json`. The schema is stable and is the same one the MCP server returns, so scripts and agents see identical data:
+
+```console
+$ sdbctl list --json | jq -r '.entries[] | select(.hidden) | .fullId'
+old-kernel.conf
+windows.conf
+
+$ sdbctl list --json | jq -r '.entries[] | select(.isDefault) | .title'
+Arch Linux
+```
+
+Fields include `id`, `fullId`, `title`, `imageKeys`, `isDefault`, `isOneShot`, `isLastBooted`, `hidden` and `issues`. `hidden` is the important one: it means *systemd-boot will not show this entry in the boot menu*.
+
+---
+
+## MCP server
+
+`sdbctl mcp` speaks the Model Context Protocol over stdio, so an agent can
+inspect a machine's boot setup with the same semantics the CLI has:
+
+```bash
+sudo sdbctl mcp
+```
+
+Point an MCP client at it:
+
+```json
+{
+  "mcpServers": {
+    "sdbctl": {
+      "command": "sudo",
+      "args": ["sdbctl", "mcp"]
+    }
+  }
+}
+```
+
+Five tools, all read-only:
+
+| Tool | Answers |
+|------|---------|
+| `sdbctl_status` | *What will this machine boot?* Default entry, pending one-shot, last booted, loader state |
+| `sdbctl_list_entries` | *What boot options do I have?* Every entry, with the ones systemd-boot will hide marked |
+| `sdbctl_check` | *Is this boot going to fail?* The full diagnostics: missing files, conflicting keys, architecture mismatches, missing `root=`, loader drift |
+| `sdbctl_snapshots` | *What could I roll back to?* The snapshots taken before earlier changes |
+| `sdbctl_recommend` | *How do I make this change?* Given a goal in plain language, the exact commands to run and what each would change — grounded in the machine's actual state |
+
+**The server cannot change anything.** There is no `--allow-write` and no
+mutating tool — not a hidden one, not a gated one. Changing boot settings
+stays a deliberate act by a human at a terminal, because a stray tool call on
+the wrong machine can leave it unbootable. The CLI verbs (`sdbctl boot`,
+`default`, `set`, `rm`, `undo`) remain the way to make changes.
+
+What the server *can* do is plan: `sdbctl_recommend` turns a goal into the
+commands to run, so an agent can answer "I want to boot the other distro
+next time — how?" with the exact command and what it would change, without
+touching anything.
+
+```console
+$ sdbctl recommend "boot fedora once"
+sudo sdbctl boot fedora.conf --reboot
+  fedora.conf boots once on the next restart and the machine restarts into it.
+  effect: sets LoaderEntryOneShot; the boot loader clears it after one boot
+```
+
+Results come back as both human-readable text and `structuredContent` JSON,
+and the JSON is the same schema `sdbctl --json` prints.
+
+---
+
+## The editor
+
+`sdbctl edit` (or `sdbctl -e`) opens the full-screen editor for the things a TUI does better: browsing entries with their warnings, editing every field with context help and path completion, previewing raw files, and a diff before anything is written.
 
 ![Main view — entries list, detail pane, and loader pane](assets/01-main-screen.png)
-*Main view — entry badges: `[★]` default, `[!]` hidden entry, `[UKI]` unified kernel image*
+*Main view — badges: `[★]` default, `[!]` hidden entry, `[UKI]` unified kernel image*
 
 ![Edit mode — field-by-field editing with tab completion dropdown](assets/02-edit-entry-tab-completion.png)
 *Editing a boot entry — path completion for kernel/initrd/EFI paths*
@@ -36,214 +205,78 @@ Before using, understand the following risks:
 ![Diagnostics overlay](assets/05-boot-diagnostics.png)
 *Diagnostics (`d`) — loader binaries, version drift, broken entries*
 
-<sub>All screenshots are generated from a synthetic sample ESP with `make screenshots`.</sub>
+<sub>The screenshots are generated from a synthetic sample ESP with `make screenshots`.</sub>
 
 ---
 
-## Features
+## What it checks
 
-**Entries (Boot Loader Specification Type #1 & #2)**
+`systemd-boot` **silently drops** entries it does not like. sdbctl reproduces those rules, using the version of the boot loader binary actually installed on the ESP (read from its `.sdmagic` section), because the rules changed over time:
 
-- Browse all boot entries in `loader/entries/` and UKIs in `EFI/Linux/` (`.efi` and `.uki`)
-- Create new boot entries with guided field editing, including **`efi` chainload entries for Windows/macOS dual boot**
-- Delete existing entries with confirmation
-- View and edit every BLS key: `title`, `version`, `linux`, `initrd`, `efi`, `uki`, `uki-url`, `profile`, `options`, `machine-id`, `architecture`, `sort-key`, `devicetree`, `devicetree-overlay`, `extra` (credentials, sysext/confext, UKI addons)
-- Comments and vendor/unknown lines inside entry files are preserved verbatim on save
-- Add new `initrd`, `extra`, or `devicetree-overlay` lines to an existing entry with `Ctrl+N` in edit mode
-- Tab completion for boot-partition file paths (`linux`, `initrd`, `efi`, `uki`, `devicetree`, `extra`), case-insensitive, from the cached ESP layout
-- Per-field validation: path format (the spec's optional leading `/` is accepted), illegal characters, constrained values (architecture, profile, etc.)
-- Exactly one of `linux` / `efi` / `uki` / `uki-url` is enforced before saving — the mistake that makes systemd-boot silently drop an entry
+| Condition | Effect |
+|-----------|--------|
+| kernel/initrd/EFI file missing | entry hidden |
+| more than one of `linux`/`efi`/`uki`/`uki-url` | hidden on systemd ≥ 258; older versions boot the last one listed |
+| `architecture` does not match this machine | entry hidden |
+| `uki`/`uki-url` on systemd < 258 | key unknown, entry hidden |
+| `extra`/`profile` on older systemd | key ignored (companion files not passed) |
+| no `root=` in the command line | boot depends on systemd's gpt-auto-discovery — the classic post-update brick |
 
-**Loader configuration (`loader.conf`)**
+It also reports the loader state itself: whether the ESP copy is older than the packaged one (`bootctl update`), whether the `\EFI\BOOT` fallback was replaced (Windows updates do this), whether `default=` matches any entry at all, and whether a foreign `machine-id` means the entry belongs to another installation.
 
-- Set the default boot entry with a single keypress (`s`), written as the full entry ID (`.conf` suffix included, as loader.conf(5) requires)
-- View and edit all `loader.conf` settings: `timeout`, `default`, `preferred`, `editor`, `console-mode`, `auto-entries`, `auto-firmware`, `auto-reboot`, `auto-poweroff`, `beep`, `reboot-for-bitlocker`, `reboot-on-error`, `secure-boot-enroll`, `secure-boot-enroll-action`, `secure-boot-enroll-timeout-sec`, `log-level`
-- Unknown or distro-added options (e.g. `keyfile`) are displayed read-only and **survive saves** — a corrupted or exotic loader.conf can no longer break the panel, it warns line by line instead
+All of these predictions are **verified against the real boot loader**: `make boot-oracle` boots the packaged systemd-boot under qemu + OVMF against a synthetic ESP and diffs sdbctl's predictions against the menu it actually renders.
 
-**Validation & diagnostics**
-
-- ESP file-existence validation — entries with missing kernel, initrd, EFI binary, or extra files are flagged with a `[!]` badge: **systemd-boot hides these entries from the boot menu**
-- Detects other reasons an entry never appears: conflicting image keys, `architecture` mismatch with this machine, malformed lines
-- Warns when a kernel entry lacks `root=` (boot then depends on systemd's gpt-auto-discovery — a common post-update bricking cause on Arch-family distros)
-- Notes entries whose `machine-id` belongs to a different OS installation
-- Checks that loader.conf `default=` actually matches an existing entry, with the classic suffix footgun explained in-place
-- `d` opens a diagnostics overlay: XBOOTLDR vs ESP layout, presence and versions of `EFI/systemd/systemd-boot*.efi` and the `EFI/BOOT/BOOT*.EFI` fallback vs the packaged binary (`bootctl update` drift, Windows-update-overwritten fallback), active EFI-variable state
-- One-shot boot override: press `o` to set `LoaderEntryOneShot` for the selected entry (boots it once on next restart, then clears automatically; works for `.conf` entries and UKIs). Shows a `[1x]` badge. EFI systems only
-- `[★]` default badge matches `default=` globs the same way systemd-boot does (case-insensitive, full ID); `default @saved` highlights the last-booted entry via `LoaderEntryLastBooted` (`[●]` badge)
-- **Undo** — every write and delete is snapshotted to `<boot-dir>/loader/sdboot-tui-backups/<timestamp>/` first; press `u` to restore the last snapshot (the undo itself is snapshotted, so it is reversible)
-- Save confirmation with diff view
-- File preview overlay — raw `.conf` for any entry or `loader.conf`; UKIs show path/size metadata
-- Last-modified timestamp shown for entries and loader config
-- Context-sensitive help for each editable field
-- Keyboard navigation with arrow keys or `j`/`k`; `Tab`/`Shift+Tab`/`←`/`→` to switch panes
-- Nord color theme
-
-**Non-interactive mode**
-
-- `sdboot-tui --check` prints the same diagnostics as the `d` overlay as plain text and exits non-zero when problems are found — handy for installer scripts, CI, or a machine you cannot boot into
-- `sdboot-tui --restore` restores the most recent snapshot; `sdboot-tui --list-backups` lists what is available
-
-## Requirements
-
-- Linux with systemd-boot installed
-- The boot loader directory (`loader/entries/…`) reachable at `/boot`, `/boot/efi`, or `/efi` — this covers both plain-ESP layouts and XBOOTLDR setups (Fedora-style separate `/boot`). The tool edits the first candidate containing a `loader/` directory, which is exactly where systemd-boot reads its entries
-- Root or appropriate group membership to write to the ESP
-- For one-shot boot and `[●]` last-booted badge: EFI system with `/sys/firmware/efi/efivars` accessible
-
-## Installation
-
-### Pre-built binary (eget)
-
-[eget](https://github.com/zyedidia/eget) installs the latest release binary directly from GitHub:
-
-```bash
-sudo eget mwtrigg/sdboot-tui --to /usr/local/bin/
-```
-
-### go install
-
-Requires Go 1.24+.
-
-```bash
-go install github.com/mwtrigg/sdboot-tui@latest
-sudo mv "$(go env GOPATH)/bin/sdboot-tui" /usr/local/bin/
-```
-
-### From source
-
-Requires Go 1.24+.
-
-```bash
-git clone https://github.com/mwtrigg/sdboot-tui
-cd sdboot-tui
-make build
-sudo make install        # PREFIX=/usr/local by default
-```
-
-## Usage
-
-```bash
-sudo sdboot-tui [-esp /path/to/esp]
-```
-
-Default boot-directory paths checked: `/boot`, `/boot/efi`, `/efi`
-
-### Non-interactive use
-
-```bash
-sdboot-tui --check                  # diagnostics report; exit 1 if problems were found
-sdboot-tui --restore                # roll back the most recent change
-sdboot-tui --list-backups           # list available snapshots
-sdboot-tui --version
-```
-
-`--check` never writes anything and does not need root:
-
-```console
-$ sdboot-tui --check -esp /boot
-sdboot-tui diagnostics
-  boot directory : /boot
-  loader        : /EFI/systemd/systemd-bootx64.efi (systemd-boot 259.1)
-  fallback      : /EFI/BOOT/BOOTX64.EFI
-  package       : systemd-boot 259.1
-...
-entries
-  old-kernel.conf
-    ! linux file not found: /arch/6.10.1-arch1-1/linux (entry hidden from boot menu)
-
-3 problem(s) found
-```
-
-### Chroot / recovery environments
-
-The `-esp` flag is useful when the ESP is not at a standard path — for example during Arch Linux installation or system recovery:
-
-```bash
-sudo sdboot-tui -esp /mnt/boot
-```
-
-One-shot boot (`o` key) writes to `/sys/firmware/efi/efivars` on the **running** system. From inside a chroot, this only works if `/sys` is bind-mounted into the chroot first:
-
-```bash
-mount --rbind /sys /mnt/sys
-```
-
-Without that, `efivars` will not be visible inside the chroot and the one-shot feature is silently disabled. Note: `arch-chroot` does this automatically.
-
-### Keyboard shortcuts
-
-| Key | Action |
-|-----|--------|
-| `↑`/`↓` or `j`/`k` | Navigate entry list |
-| `Tab`/`Shift+Tab` or `←`/`→` | Switch panes |
-| `n` | New boot entry |
-| `D` | Delete selected entry |
-| `s` | Set selected entry as default |
-| `o` | Toggle one-shot boot (EFI only) |
-| `u` | Undo the last change (restore the last snapshot) |
-| `e` | Enter edit mode |
-| `↑`/`↓` | Navigate fields (in edit mode) |
-| `Tab` | Next field / path completion (in edit mode) |
-| `Ctrl+N` | Add another initrd/extra/overlay line (in edit mode) |
-| `Enter` | Save changes (in edit mode) |
-| `Escape` | Cancel editing / discard new entry |
-| `p` | Preview raw file (entries or loader.conf; UKIs show metadata) |
-| `d` | Boot diagnostics overlay |
-| `?` | Toggle help overlay |
-| `q`/`Ctrl+C` | Quit |
+---
 
 ## Troubleshooting
 
-Common systemd-boot problems the diagnostics (`d`) and validation are built to catch:
+**"My entry doesn't appear in the boot menu"** — run `sdbctl check`. Entries systemd-boot will hide are marked `!` in `sdbctl list` and explained in the check output: missing kernel/initrd/EFI files (including after a kernel upgrade or when pointing at another disk's ESP), conflicting image keys, an `architecture` for another machine, or `uki` on an old boot loader. On XBOOTLDR setups, some firmware skips non-ESP partitions when "fast boot" is enabled.
 
-**"My boot entry doesn't appear in the menu"**
-systemd-boot *silently drops* entries it dislikes. A `[!]` badge marks each one:
+**"Windows disappeared after an update"** — Windows updates overwrite `\EFI\BOOT\BOOTX64.EFI`. The diagnostics flag a fallback that is no longer systemd-boot. Restore it with `sudo bootctl install`, then `sudo sdbctl boot windows.conf --reboot`.
 
-- kernel/initrd/`efi` file missing on the boot partition — happens after kernel removal, path typos, or referencing files on a *different disk's* ESP (not supported: entries can only load files from the partition they live on; copy the other OS's EFI folder to your ESP, or rely on `auto-entries`)
-- more than one of `linux`/`efi`/`uki`/`uki-url` set, or none
-- `architecture` doesn't match this machine (case-insensitive)
-- on XBOOTLDR setups some firmware skips non-ESP partitions when "fast boot" is enabled — disable it in firmware setup (the diagnostics overlay tells you when this layout is in use)
-- also worth checking: `auto-entries no` hides Windows/macOS/EFI-shell auto-detection entirely
+**"The system stopped booting after a kernel update"** — usually the entry lost its `root=`, so systemd falls back to discovering the root by GPT partition type and the initramfs hangs. sdbctl flags entries without `root=`. Fix it from a live USB: add `root=UUID=…` to the entry's `options`, and fix whatever generator drops it (e.g. `/etc/kernel/cmdline` on dracut systems, then `reinstall-kernels`).
 
-**"System boots into Windows after a Windows update"**
-Windows updates overwrite the `\EFI\BOOT\BOOTX64.EFI` fallback (and sometimes the boot order). The diagnostics overlay flags a non-systemd-boot fallback binary. Recovery: boot via the firmware menu, then `sudo bootctl install` to restore the fallback, and use the one-shot feature (`o`) to reboot into firmware setup if needed.
+**"The default entry is not being selected"** — `default=` is a case-insensitive glob matched against the **full entry ID including the `.conf` suffix**: `default arch` matches nothing, `default arch.conf` matches. `sdbctl default <entry>` always writes the correct form.
 
-**"System stopped booting after a kernel update" (missing `root=`)**
-If a regenerated boot entry lost its `root=` parameter, systemd falls back to discovering the root by GPT partition type (Discoverable Partitions Spec); if your disk layout predates that, the boot hangs in the initramfs. sdboot-tui warns on entries without `root=`. Fix from a live USB (with `sdboot-tui -esp /mnt/boot` or manually): put `root=UUID=…` back in `options`, and correct whatever generator drops it (e.g. `/etc/kernel/cmdline` on dracut systems, then `reinstall-kernels`/kernel-install).
+**"Is my one-shot set?"** — `sdbctl status` shows the pending one-shot. sdbctl writes the full entry ID, which is what current systemd-boot matches against.
 
-**"The default entry isn't being selected"**
-`default=` is a case-insensitive glob matched against the **full entry ID, including the `.conf` suffix** — `default arch` matches nothing, `default arch.conf` matches. The loader pane flags patterns that select no entry. Use `default @saved` to remember the last manually selected entry (the `[●]` badge shows what will boot by default now).
+**General verification** — `bootctl status` and `bootctl list` remain authoritative for what the loader sees; `sdbctl` is authoritative for what sdbctl will write.
 
-**"Is one-shot really set?"**
-Press `o`, then `d`: the overlay lists the current `LoaderEntryOneShot` value. sdboot-tui writes the full entry ID (`arch.conf`), which is what current systemd-boot matches against. Very old loaders expected the token without the suffix; if one-shot never fires on a pre-2023 systemd, that's why.
-
-**General verification**
-The boot loader's own view is authoritative: run `bootctl status` and `bootctl list` after editing, and preview the exact file (`p`) before saving. `sudo bootctl update` keeps the installed EFI binary in sync with the systemd package — the diagnostics overlay flags when it's stale.
+---
 
 ## Known limitations
 
-- Backups cover changes made through this tool, not changes made by your package manager or `kernel-install` — and they live on the boot partition (`loader/sdboot-tui-backups/`), so copy them elsewhere if the ESP itself is suspect
-- UKI files (`EFI/Linux/*.efi`) are listed, previewed as metadata, settable as default and one-shot, but not created or edited here — they are built by `kernel-install`/`ukify`
-- The entry list is shown in file-name order, not the boot menu's BLS sort order (sort-key/version); `bootctl list` shows the loader's own view
-- Boot loader installation (`bootctl install`/`update`) and firmware boot order management stay in `bootctl`'s hands — sdboot-tui tells you when they're needed
+- Snapshots cover changes made through this tool, and they live on the boot partition (`loader/sdbctl-backups/`) — copy them elsewhere if the ESP itself is suspect. Snapshots taken by the pre-rename releases are still listed and restorable.
+- Unified kernel images (`EFI/Linux/*.efi`) can be listed, previewed, booted and made default, but not created or edited — that is `kernel-install`/`ukify` territory.
+- The entry list is in file-name order, not the boot menu's BLS sort order; `bootctl list` shows the loader's own view.
+- Installing and updating the boot loader itself stays with `bootctl install` / `bootctl update`; sdbctl tells you when they are needed.
+- `sdbctl` does not create entries; use `sdbctl edit` for that.
+
+---
 
 ## Project structure
 
 ```
-sdboot-tui/
+sdbctl/
 ├── main.go
 ├── internal/
 │   ├── boot/               # ESP discovery, entry and loader.conf parsing,
-│   │                       # validation, diagnostics, EFI variables
+│   │                       # validation, diagnostics, snapshots, EFI variables
 │   │   ├── entry.go        # BLS Type #1 entries + round-trip writer
 │   │   ├── loader.go       # loader.conf (lenient, round-trip preserving)
+│   │   ├── loader_set.go   # assigning loader.conf options by name
 │   │   ├── validate.go     # "will systemd-boot show this entry?" checks
 │   │   ├── diagnose.go     # ESP/loader layout + version inspection
-│   │   ├── report.go       # shared report for the overlay and --check
+│   │   ├── report.go       # shared report for status/check/MCP
 │   │   ├── backup.go       # snapshots + restore
 │   │   ├── efivar.go       # LoaderEntryOneShot / LastBooted
 │   │   └── esp.go          # boot directory discovery
-│   └── ui/                 # Bubble Tea TUI
+│   ├── cli/                # the command surface
+│   │   ├── api.go          # every operation, typed results, no printing
+│   │   ├── cli.go          # argument parsing, rendering, exit codes
+│   │   ├── mcp.go          # MCP server over stdio
+│   │   └── completion.go   # bash/zsh/fish completion scripts
+│   └── ui/                 # Bubble Tea editor
 │       ├── model.go        # Model, Update, key handling
 │       ├── view.go         # Layout, overlays, header, help bar
 │       ├── edit.go         # Inline editing, tab completion, field definitions, validators
@@ -252,11 +285,15 @@ sdboot-tui/
 │       ├── pane_loader.go  # loader.conf view / edit pane
 │       ├── styles.go       # Lip Gloss styles (Nord palette)
 │       └── helpers.go      # Utility functions
-├── tools/screenshot.py     # regenerates the README screenshots (pty + pyte + Chrome)
-└── testdata/               # Sample ESP layout for tests
+├── tools/
+│   ├── bootoracle.py       # boots real systemd-boot and checks our predictions
+│   └── screenshot.py       # regenerates the README screenshots
+└── docs/sdbctl.1           # man page
 ```
 
-## Specifications this tool implements
+---
+
+## Specifications implemented
 
 - [UAPI.1 Boot Loader Specification](https://uapi-group.org/specifications/specs/boot_loader_specification/) — entry files, keys, ID semantics
 - [`loader.conf(5)`](https://www.freedesktop.org/software/systemd/man/latest/loader.conf.html) — loader options
@@ -264,7 +301,7 @@ sdboot-tui/
 
 ## Contributing
 
-Issues and PRs welcome on [GitHub](https://github.com/mwtrigg/sdboot-tui). The canonical repository is on [GitHub](https://github.com/mwtrigg/sdboot-tui). See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev loop.
+See [CONTRIBUTING.md](CONTRIBUTING.md). The test tiers are worth knowing about: unit tests and fuzz targets run everywhere, and `make boot-oracle` boots a real systemd-boot under qemu to check our predictions.
 
 ## License
 

@@ -410,7 +410,7 @@ func TestParseEntryEFIKey(t *testing.T) {
 
 	// A chainload entry for Windows, the way users create them for
 	// dual-boot (SuperUser/Reddit: "Windows entry does not appear").
-	content := `# Created by: sdboot-tui
+	content := `# Created by: sdbctl
 title Windows Boot Manager
 efi /EFI/Microsoft/Boot/bootmgfw.efi
 `

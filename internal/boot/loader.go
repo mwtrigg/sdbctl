@@ -58,6 +58,10 @@ func defaultLoaderConfig() *LoaderConfig {
 	}
 }
 
+// NewLoaderConfig returns a configuration holding systemd-boot's documented
+// defaults, used when loader.conf does not exist yet.
+func NewLoaderConfig() *LoaderConfig { return defaultLoaderConfig() }
+
 func ParseLoaderConf(path string) (*LoaderConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -181,7 +185,7 @@ func (c *LoaderConfig) writeStandard() []byte {
 	for _, kv := range c.valueMap() {
 		lines = append(lines, kv.Key+" "+kv.Value)
 	}
-	return []byte(strings.Join(lines, "\n") + "\n")
+	return []byte(strings.Join(trimTrailingBlanks(lines), "\n") + "\n")
 }
 
 func (c *LoaderConfig) writeWithRawLines() []byte {
@@ -230,7 +234,7 @@ func (c *LoaderConfig) writeWithRawLines() []byte {
 		}
 	}
 
-	return []byte(strings.Join(lines, "\n") + "\n")
+	return []byte(strings.Join(trimTrailingBlanks(lines), "\n") + "\n")
 }
 
 // valueMap returns non-empty current values in canonical key order. Bool

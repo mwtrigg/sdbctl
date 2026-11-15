@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mwtrigg/sdboot-tui/internal/boot"
+	"github.com/mwtrigg/sdbctl/internal/boot"
 )
 
 func (m *model) View() string {
@@ -311,7 +311,7 @@ func (m *model) diagOverlay() string {
 
 func (m *model) helpOverlay() string {
 	helpContent := lipgloss.JoinVertical(lipgloss.Top,
-		HelpTitleStyle.Render(" sdboot-tui Help "),
+		HelpTitleStyle.Render(" sdbctl Help "),
 		"",
 		"  Navigation",
 		"  ──────────────────────────────────────",
@@ -336,7 +336,7 @@ func (m *model) helpOverlay() string {
 		"",
 		"  About",
 		"  ──────────────────────────────────────",
-		"  sdboot-tui "+AppVersion,
+		"  sdbctl "+AppVersion,
 		"  "+AppRepo,
 		"",
 		"  Press ? or Esc to close",
@@ -402,7 +402,7 @@ func (m *model) header() string {
 		w = 20
 	}
 	content := lipgloss.JoinHorizontal(lipgloss.Left,
-		HeaderTitleStyle.Render(" sdboot-tui "),
+		HeaderTitleStyle.Render(" sdbctl "),
 		HeaderTitleStyle.Render(" "+AppVersion+" "),
 		HeaderMetaStyle.Render(" "+AppRepo),
 	)

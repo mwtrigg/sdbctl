@@ -1,0 +1,211 @@
+.TH SDBCTL 1 "2026-11-15" "sdbctl 2.0.0" "User Commands"
+.SH NAME
+sdbctl \- inspect and control systemd-boot
+.SH SYNOPSIS
+.B sdbctl
+.RI [ verb ]
+.RI [ flags ]
+.RI [ args ]
+.SH DESCRIPTION
+.B sdbctl
+shows what systemd-boot will boot, lets you boot another entry for the next
+restart, and explains why an entry is missing from the boot menu.
+.PP
+It is CLI-first: every operation is a verb with machine-readable
+.B \-\-json
+output, so the same commands work in a shell, in a script, and from an agent.
+The full-screen editor is available as
+.B sdbctl edit
+for work that benefits from a UI.
+.PP
+Most operations write to the EFI System Partition and need root. Every write
+or delete is snapshotted first, so changes can be rolled back with
+.BR "sdbctl undo" .
+.SH VERBS
+.TP
+.B (no verb), status
+Boot status: the loader binaries found, the default entry, the pending
+one-shot, and every entry with its warnings.
+.TP
+.B list
+One line per boot entry. With
+.B \-\-ids
+only the identifiers are printed, one per line, which is what completion
+scripts and shell loops want. With
+.B \-\-json
+the full listing is printed as JSON.
+.TP
+.BI "boot " entry
+Boot
+.I entry
+exactly once on the next restart, by writing the
+.B LoaderEntryOneShot
+EFI variable. With
+.B \-\-reboot
+the machine restarts immediately as well.
+.TP
+.BI "default " entry
+Make
+.I entry
+the persistent default in
+.IR loader.conf .
+The special value
+.B @saved
+remembers the last manually chosen entry.
+.TP
+.BI "timeout " value
+Set the boot menu timeout: a number of seconds, or
+.BR menu\-force ,
+.BR menu\-hidden ,
+.BR menu\-disabled .
+.TP
+.BI "set " "key value"
+Set any
+.I loader.conf
+option. An empty value clears the option, removing its line. Unknown keys are
+refused rather than guessed at.
+.TP
+.BI "rm " entry
+Delete a type #1 boot entry. Unified kernel images are refused: they belong to
+the package manager.
+.TP
+.B undo
+Restore the most recent snapshot.
+.TP
+.B snapshots
+List the snapshots taken before changes.
+.TP
+.BI "recommend " goal
+Suggest the commands for a stated goal, for example
+"boot fedora once", together with what each would change. Nothing is
+changed; the recommendations are the same ones the MCP server returns.
+.TP
+.B check
+Full diagnostics. Exits with status 1 when problems were found, which makes
+it usable as a gate in scripts and CI.
+.TP
+.B edit
+Launch the full-screen editor.
+.TP
+.B mcp
+Serve the same operations over stdio as a Model Context Protocol server. See
+.B "MCP SERVER"
+below.
+.TP
+.BI "completion " shell
+Print a completion script for
+.BR bash ,
+.B zsh
+or
+.BR fish .
+.TP
+.B version
+Print the version.
+.TP
+.B help
+Print a usage summary.
+.SH OPTIONS
+.TP
+.BI \-\-esp " path"
+Boot directory to operate on. The default is the first of
+.IR /boot ,
+.I /boot/efi ,
+.I /efi
+that contains a
+.I loader
+directory, which covers both plain ESP layouts and XBOOTLDR setups.
+.TP
+.B \-\-json
+Print machine-readable JSON. The schema is stable and identical to what the
+MCP server returns.
+.TP
+.B \-\-dry\-run
+Report what would change without changing anything.
+.TP
+.B \-\-force
+Act on an entry systemd-boot would hide.
+.TP
+.BI \-\-yes " / " \-y
+Skip confirmation prompts.
+.TP
+.BI \-\-quiet " / " \-q
+Suppress explanatory prose.
+.SH MCP SERVER
+.B sdbctl mcp
+speaks the Model Context Protocol over stdio. It is read-only: it exposes
+.B sdbctl_status
+(what will this machine boot),
+.B sdbctl_list_entries
+(what boot options exist),
+.B sdbctl_check
+(will this boot fail),
+.B sdbctl_snapshots
+(what could be rolled back) and
+.B sdbctl_recommend
+(how would I make this change), and nothing else. There is no flag to enable
+mutating tools, because changing boot settings stays a deliberate act by a
+human at a terminal.
+.SH ENVIRONMENT
+.TP
+.B SDBCTL_EFIVARS
+Overrides the efivarfs mount point, which is
+.I /sys/firmware/efi/efivars
+by default. Useful in chroots and containers where
+.I /sys
+is not bind-mounted.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+An operation failed, or
+.B check
+found problems.
+.TP
+.B 2
+The command line was invalid.
+.SH FILES
+.TP
+.IR /boot/loader/loader.conf ", " /boot/efi/loader/loader.conf ", " /efi/loader/loader.conf
+The boot loader configuration.
+.TP
+.IR /boot/loader/entries/*.conf
+Boot entry descriptions.
+.TP
+.IR /boot/loader/sdbctl-backups/
+Snapshots taken before changes.
+.SH EXAMPLES
+Show the status, and only the entries that will not boot:
+.PP
+.EX
+sdbctl status
+sdbctl list --json | jq -r '.entries[] | select(.hidden) | .fullId'
+.EE
+.PP
+Boot another distribution once and reboot into it:
+.PP
+.EX
+sudo sdbctl boot fedora.conf --reboot
+.EE
+.PP
+Make it the permanent default, and remember the last choice instead:
+.PP
+.EX
+sudo sdbctl default fedora.conf
+sudo sdbctl default @saved
+.EE
+.PP
+Use it as a gate in a provisioning script:
+.PP
+.EX
+sdbctl check || exit 1
+.EE
+.SH SEE ALSO
+.BR bootctl (1),
+.BR systemd-boot (7),
+.BR loader.conf (5)
+.PP
+The Boot Loader Specification:
+.UR https://uapi-group.org/specifications/specs/boot_loader_specification/
+.UE

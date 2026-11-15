@@ -10,10 +10,10 @@ import (
 )
 
 // backupDirName is the directory (relative to the boot partition root) where
-// sdboot-tui keeps timestamped snapshots of files it is about to overwrite or
+// sdbctl keeps timestamped snapshots of files it is about to overwrite or
 // delete. It lives under loader/ so it travels with the ESP, but outside
 // loader/entries/ so systemd-boot never sees it.
-const backupDirName = "sdboot-tui-backups"
+const backupDirName = "sdbctl-backups"
 
 // Backup is one snapshot of one or more files.
 type Backup struct {
@@ -28,8 +28,13 @@ type Backup struct {
 	Files []string
 }
 
-// BackupRoot returns the directory holding all backups for a boot directory.
+// BackupRoot returns the directory where snapshots are written.
 func BackupRoot(bootDir string) string {
+	return backupRoot(bootDir)
+}
+
+// backupRoot is the directory holding snapshots for a boot directory.
+func backupRoot(bootDir string) string {
 	return filepath.Join(bootDir, "loader", backupDirName)
 }
 
@@ -103,40 +108,47 @@ func CreateBackup(bootDir string, relPaths []string) (*Backup, error) {
 	return b, nil
 }
 
-// ListBackups returns all backups for a boot directory, newest first.
+// ListBackups returns every snapshot for a boot directory, newest first.
 func ListBackups(bootDir string) ([]Backup, error) {
-	root := BackupRoot(bootDir)
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
 	var backups []Backup
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		dir := filepath.Join(root, e.Name())
-		b := Backup{ID: e.Name(), Path: dir}
-		if t, err := time.Parse("20060102-150405", e.Name()); err == nil {
-			b.Time = t
-		}
-		_ = filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() {
-				return nil
+
+	{
+		root := backupRoot(bootDir)
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, nil
 			}
-			rel, relErr := filepath.Rel(dir, p)
-			if relErr != nil {
-				return nil
+			return nil, err
+		}
+
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
 			}
-			b.Files = append(b.Files, filepath.ToSlash(rel))
-			return nil
-		})
-		sort.Strings(b.Files)
-		backups = append(backups, b)
+			dir := filepath.Join(root, e.Name())
+			b := Backup{ID: e.Name(), Path: dir}
+			// IDs are timestamps, optionally with a collision suffix
+			// ("20261114-120000-2"), so parse the fixed-width prefix.
+			if len(e.Name()) >= 15 {
+				if t, err := time.Parse("20060102-150405", e.Name()[:15]); err == nil {
+					b.Time = t
+				}
+			}
+			_ = filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
+				if err != nil || info.IsDir() {
+					return nil
+				}
+				rel, relErr := filepath.Rel(dir, p)
+				if relErr != nil {
+					return nil
+				}
+				b.Files = append(b.Files, filepath.ToSlash(rel))
+				return nil
+			})
+			sort.Strings(b.Files)
+			backups = append(backups, b)
+		}
 	}
 
 	sort.Slice(backups, func(i, j int) bool {

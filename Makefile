@@ -1,10 +1,11 @@
-BINARY    := sdboot-tui
+BINARY    := sdbctl
 PREFIX    ?= /usr/local
 BINDIR    := $(PREFIX)/bin
 
 # Version from git tag, falling back to "dev"
 VERSION   := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS   := -s -w -X github.com/mwtrigg/sdboot-tui/internal/ui.AppVersion=$(VERSION)
+LDFLAGS   := -s -w -X github.com/mwtrigg/sdbctl/internal/ui.AppVersion=$(VERSION) \
+	-X github.com/mwtrigg/sdbctl/internal/cli.Version=$(VERSION)
 
 .PHONY: build install uninstall test clean screenshots
 
@@ -27,3 +28,9 @@ clean:
 # Chrome/Chromium binary; see tools/screenshot.py.
 screenshots: build
 	python3 tools/screenshot.py --out assets
+
+# Verify sdbctl's show/hide predictions against the real systemd-boot,
+# booted under qemu+OVMF with a synthetic ESP. Needs qemu, OVMF, dosfstools,
+# sudo and the packaged systemd-boot EFI binary; see tools/bootoracle.py.
+boot-oracle: build
+	python3 tools/bootoracle.py

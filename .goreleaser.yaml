@@ -1,5 +1,5 @@
 # .goreleaser.yaml
-# GoReleaser v2 config for sdboot-tui
+# GoReleaser v2 config for sdbctl
 # Docs: https://goreleaser.com
 version: 2
 
@@ -9,8 +9,8 @@ before:
     - go test ./...
 
 builds:
-  - id: sdboot-tui
-    binary: sdboot-tui
+  - id: sdbctl
+    binary: sdbctl
     main: .
     env:
       - CGO_ENABLED=0
@@ -21,16 +21,18 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/mwtrigg/sdboot-tui/internal/ui.AppVersion={{.Version}}
+      - -X github.com/mwtrigg/sdbctl/internal/ui.AppVersion={{.Version}}
+      - -X github.com/mwtrigg/sdbctl/internal/cli.Version={{.Version}}
 
 archives:
-  - id: sdboot-tui
+  - id: sdbctl
     formats:
       - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
       - LICENSE
+      - docs/sdbctl.1
 
 checksum:
   name_template: "checksums.txt"
@@ -49,7 +51,7 @@ changelog:
 release:
   github:
     owner: mwtrigg
-    name: sdboot-tui
+    name: sdbctl
   draft: false
   prerelease: auto
   name_template: "v{{ .Version }}"

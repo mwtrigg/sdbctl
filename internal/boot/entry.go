@@ -181,7 +181,7 @@ func (e *BootEntry) writeStandard() []byte {
 			lines = append(lines, fmt.Sprintf("%s %s", key, v))
 		}
 	}
-	return []byte(strings.Join(lines, "\n") + "\n")
+	return []byte(strings.Join(trimTrailingBlanks(lines), "\n") + "\n")
 }
 
 func (e *BootEntry) writeWithRawLines() []byte {
@@ -224,7 +224,18 @@ func (e *BootEntry) writeWithRawLines() []byte {
 		}
 	}
 
-	return []byte(strings.Join(lines, "\n") + "\n")
+	return []byte(strings.Join(trimTrailingBlanks(lines), "\n") + "\n")
+}
+
+// trimTrailingBlanks drops blank lines from the end of a file. Parsing trims
+// trailing newlines before splitting, so without this the writer would keep
+// re-adding one and write(parse(x)) would not be a fixed point.
+func trimTrailingBlanks(lines []string) []string {
+	i := len(lines)
+	for i > 0 && strings.TrimSpace(lines[i-1]) == "" {
+		i--
+	}
+	return lines[:i]
 }
 
 // valueMap returns the current field values keyed by BLS key name. Cleared
