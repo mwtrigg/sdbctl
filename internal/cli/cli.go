@@ -121,6 +121,8 @@ func splitGlobals(args []string, g *globals) ([]string, error) {
 			tail = true
 		case a == "-e":
 			rest = append(rest, "edit")
+		case a == "-h", a == "--help":
+			rest = append([]string{"help"}, rest...)
 		case strings.HasPrefix(a, "-"):
 			name := strings.TrimLeft(a, "-")
 			value := ""
