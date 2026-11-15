@@ -15,11 +15,6 @@ import (
 // loader/entries/ so systemd-boot never sees it.
 const backupDirName = "sdbctl-backups"
 
-// legacyBackupDirName is the directory used by the sdboot-tui releases before
-// the rename. Snapshots taken there stay visible and restorable, because
-// losing access to the last snapshot is the worst possible time to be tidy.
-const legacyBackupDirName = "sdboot-tui-backups"
-
 // Backup is one snapshot of one or more files.
 type Backup struct {
 	// ID is the directory name, e.g. "20261114-101530".
@@ -33,17 +28,14 @@ type Backup struct {
 	Files []string
 }
 
-// BackupRoot returns the directory where new snapshots are written.
+// BackupRoot returns the directory where snapshots are written.
 func BackupRoot(bootDir string) string {
-	return filepath.Join(bootDir, "loader", backupDirName)
+	return backupRoot(bootDir)
 }
 
-// backupRoots lists every directory that may hold snapshots, new before old.
-func backupRoots(bootDir string) []string {
-	return []string{
-		filepath.Join(bootDir, "loader", backupDirName),
-		filepath.Join(bootDir, "loader", legacyBackupDirName),
-	}
+// backupRoot is the directory holding snapshots for a boot directory.
+func backupRoot(bootDir string) string {
+	return filepath.Join(bootDir, "loader", backupDirName)
 }
 
 // backupID formats a timestamp into a sortable directory name.
@@ -116,16 +108,16 @@ func CreateBackup(bootDir string, relPaths []string) (*Backup, error) {
 	return b, nil
 }
 
-// ListBackups returns every snapshot for a boot directory — including those
-// taken under the pre-rename directory name — newest first.
+// ListBackups returns every snapshot for a boot directory, newest first.
 func ListBackups(bootDir string) ([]Backup, error) {
 	var backups []Backup
 
-	for _, root := range backupRoots(bootDir) {
+	{
+		root := backupRoot(bootDir)
 		entries, err := os.ReadDir(root)
 		if err != nil {
 			if os.IsNotExist(err) {
-				continue
+				return nil, nil
 			}
 			return nil, err
 		}

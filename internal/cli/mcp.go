@@ -8,17 +8,18 @@ import (
 	"strings"
 )
 
-// sdbctl speaks MCP (Model Context Protocol) over stdio, so agents can drive
-// the same operations the CLI does. The server is a thin wrapper over API:
-// there is no second implementation of any behaviour to drift out of sync.
+// sdbctl speaks MCP (Model Context Protocol) over stdio, so agents can
+// *inspect* a machine's boot setup with the same semantics the CLI has. The
+// server is a thin wrapper over API: there is no second implementation of
+// any behaviour to drift out of sync.
 //
-// Safety posture, deliberately conservative because this tool edits the thing
-// that boots the machine:
-//
-//   - read-only unless started with `sdbctl mcp --allow-write`
-//   - rebooting requires both --allow-write and an explicit reboot argument
-//   - every mutating result reports the snapshot id and `sdbctl undo`, so a
-//     client can roll back what it just changed
+// The server is read-only, and that is not a temporary restriction: there is
+// no --allow-write, and no tool that changes anything. An agent can answer
+// "what will this machine boot?", "which boot options do I have?", "is this
+// entry going to fail?" and "what could I roll back to?" — and nothing
+// else. Changing boot settings stays a deliberate act by a human at a
+// terminal, because a stray tool call on the wrong machine can make it
+// unbootable.
 //
 // The protocol is JSON-RPC 2.0 with newline-delimited messages.
 
@@ -63,19 +64,8 @@ type toolResult struct {
 
 // mcpServer holds the connection state for one client.
 type mcpServer struct {
-	api        *API
-	allowWrite bool
-	stderr     io.Writer
-}
-
-// writeToolNames is gated behind --allow-write.
-var writeToolNames = map[string]bool{
-	"sdbctl_boot":         true,
-	"sdbctl_set_default":  true,
-	"sdbctl_set_timeout":  true,
-	"sdbctl_set_key":      true,
-	"sdbctl_remove_entry": true,
-	"sdbctl_undo":         true,
+	api    *API
+	stderr io.Writer
 }
 
 func (s *mcpServer) tools() []toolDef {
@@ -101,58 +91,18 @@ func (s *mcpServer) tools() []toolDef {
 			InputSchema: objectSchema(map[string]any{}, nil),
 		},
 		{
-			Name: "sdbctl_boot",
-			Description: "Boot one entry exactly once on the next restart (writes LoaderEntryOneShot). " +
-				"Set reboot=true to restart immediately as well. Returns the snapshot id and an undo hint.",
+			Name: "sdbctl_recommend",
+			Description: "Given a goal in plain language (\"boot Fedora once\", \"make this the default\", " +
+				"\"why is my entry hidden\"), return the sdbctl commands to run and what each would change. " +
+				"It only recommends: the server never changes anything.",
 			InputSchema: objectSchema(map[string]any{
-				"entry":  stringProp("entry id, full id (with .conf), or glob, e.g. fedora.conf"),
-				"reboot": boolProp("also reboot now; requires the server to run with --allow-write"),
-			}, []string{"entry"}),
-		},
-		{
-			Name:        "sdbctl_set_default",
-			Description: "Set the persistent default entry in loader.conf. Pass @saved to remember the last manually chosen entry.",
-			InputSchema: objectSchema(map[string]any{
-				"entry": stringProp("entry id, full id, glob, or @saved"),
-			}, []string{"entry"}),
-		},
-		{
-			Name:        "sdbctl_set_timeout",
-			Description: "Set the boot menu timeout: seconds, menu-force, menu-hidden, or menu-disabled.",
-			InputSchema: objectSchema(map[string]any{
-				"value": stringProp("timeout value, e.g. 5 or menu-force"),
-			}, []string{"value"}),
-		},
-		{
-			Name:        "sdbctl_set_key",
-			Description: "Set any loader.conf option (timeout, default, preferred, editor, console-mode, auto-entries, auto-firmware, auto-reboot, auto-poweroff, beep, reboot-for-bitlocker, reboot-on-error, secure-boot-enroll, secure-boot-enroll-action, secure-boot-enroll-timeout-sec, log-level). An empty value clears it.",
-			InputSchema: objectSchema(map[string]any{
-				"key":   stringProp("loader.conf option name"),
-				"value": stringProp("new value, or empty to clear"),
-			}, []string{"key"}),
-		},
-		{
-			Name:        "sdbctl_remove_entry",
-			Description: "Delete a Type #1 boot entry file. Refuses unified kernel images. The previous content is snapshotted first.",
-			InputSchema: objectSchema(map[string]any{
-				"entry": stringProp("entry id or full id"),
-			}, []string{"entry"}),
-		},
-		{
-			Name:        "sdbctl_undo",
-			Description: "Restore the most recent snapshot, reverting the last change made through this tool.",
-			InputSchema: objectSchema(map[string]any{}, nil),
+				"goal":  stringProp("what you want to achieve, in plain language"),
+				"entry": stringProp("optional: the entry id the goal refers to"),
+			}, []string{"goal"}),
 		},
 	}
 
-	out := make([]toolDef, 0, len(all))
-	for _, t := range all {
-		if writeToolNames[t.Name] && !s.allowWrite {
-			continue
-		}
-		out = append(out, t)
-	}
-	return out
+	return all
 }
 
 func objectSchema(props map[string]any, required []string) map[string]any {
@@ -174,8 +124,9 @@ func boolProp(desc string) map[string]any {
 	return map[string]any{"type": "boolean", "description": desc}
 }
 
-// serveMCP runs the stdio server until stdin closes.
-func serveMCP(stdin io.Reader, stdout, stderr io.Writer, g *globals, allowWrite bool) int {
+// serveMCP runs the stdio server until stdin closes. It never changes
+// anything: the server is read-only by design.
+func serveMCP(stdin io.Reader, stdout, stderr io.Writer, g *globals) int {
 	api, err := Resolve(g.esp)
 	if err != nil {
 		fmt.Fprintf(stderr, "sdbctl mcp: %v\n", err)
@@ -184,10 +135,8 @@ func serveMCP(stdin io.Reader, stdout, stderr io.Writer, g *globals, allowWrite 
 	api.DryRun = g.dryRun
 	api.AllowHidden = g.force
 
-	s := &mcpServer{api: api, allowWrite: allowWrite, stderr: stderr}
-	if !allowWrite {
-		fmt.Fprintln(stderr, "sdbctl mcp: read-only (start with --allow-write to enable changing verbs)")
-	}
+	s := &mcpServer{api: api, stderr: stderr}
+	fmt.Fprintln(stderr, "sdbctl mcp: read-only — this server cannot change any setting")
 
 	sc := bufio.NewScanner(stdin)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -266,14 +215,6 @@ func (s *mcpServer) handle(req rpcRequest) (any, *rpcError) {
 }
 
 func (s *mcpServer) call(name string, raw json.RawMessage) (any, *rpcError) {
-	if writeToolNames[name] && !s.allowWrite {
-		return toolResult{
-			Content: []toolContent{{Type: "text", Text: fmt.Sprintf(
-				"%s is disabled: the server was started without --allow-write", name)}},
-			IsError: true,
-		}, nil
-	}
-
 	var args map[string]any
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &args); err != nil {
@@ -286,11 +227,6 @@ func (s *mcpServer) call(name string, raw json.RawMessage) (any, *rpcError) {
 		}
 		return ""
 	}
-	boolean := func(k string) bool {
-		v, _ := args[k].(bool)
-		return v
-	}
-
 	switch name {
 	case "sdbctl_status", "sdbctl_check":
 		st, err := s.api.Status()
@@ -304,29 +240,10 @@ func (s *mcpServer) call(name string, raw json.RawMessage) (any, *rpcError) {
 		snaps, err := s.api.Snapshots()
 		return s.marshal(map[string]any{"snapshots": snaps}, err)
 
-	case "sdbctl_boot":
-		res, err := s.api.Boot(str("entry"), boolean("reboot"))
-		return s.marshal(res, err)
+	case "sdbctl_recommend":
+		recs, err := s.api.Recommend(str("goal"), str("entry"))
+		return s.marshal(map[string]any{"recommendations": recs}, err)
 
-	case "sdbctl_set_default":
-		res, err := s.api.SetDefault(str("entry"))
-		return s.marshal(res, err)
-
-	case "sdbctl_set_timeout":
-		res, err := s.api.SetKey("timeout", str("value"))
-		return s.marshal(res, err)
-
-	case "sdbctl_set_key":
-		res, err := s.api.SetKey(str("key"), str("value"))
-		return s.marshal(res, err)
-
-	case "sdbctl_remove_entry":
-		res, err := s.api.Remove(str("entry"))
-		return s.marshal(res, err)
-
-	case "sdbctl_undo":
-		res, err := s.api.Undo()
-		return s.marshal(res, err)
 	}
 
 	return nil, &rpcError{Code: -32602, Message: "unknown tool: " + name}

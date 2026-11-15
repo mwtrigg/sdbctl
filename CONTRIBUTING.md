@@ -63,9 +63,9 @@ which is useful for exercising the validation paths.
 6. **The JSON schema is a public contract.** `sdbctl --json` and the MCP
    `structuredContent` share it; changing a field name is a breaking change
    for scripts and agents.
-7. **MCP is read-only by default.** New tools are added to the read-only set
-   unless they mutate; mutating tools must be listed in `writeToolNames` so
-   they are only advertised with `--allow-write`.
+7. **The MCP server is read-only, permanently.** It has no mutating tools
+   and no flag to unlock them. If you need a new capability, add a read
+   tool; changing boot settings stays a human act at a terminal.
 8. The README screenshots are generated, not hand-made: `make screenshots`
    (needs `pip install pyte` and a Chrome binary) renders the real binary in
    a pseudo-terminal. Re-run it when the UI changes.

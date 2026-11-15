@@ -75,6 +75,11 @@ Restore the most recent snapshot.
 .B snapshots
 List the snapshots taken before changes.
 .TP
+.BI "recommend " goal
+Suggest the commands for a stated goal, for example
+"boot fedora once", together with what each would change. Nothing is
+changed; the recommendations are the same ones the MCP server returns.
+.TP
 .B check
 Full diagnostics. Exits with status 1 when problems were found, which makes
 it usable as a gate in scripts and CI.
@@ -127,23 +132,19 @@ Skip confirmation prompts.
 Suppress explanatory prose.
 .SH MCP SERVER
 .B sdbctl mcp
-speaks the Model Context Protocol over stdio. It is read-only unless started
-with
-.BR \-\-allow\-write ,
-in which case the mutating tools
-.BR sdbctl_boot ,
-.BR sdbctl_set_default ,
-.BR sdbctl_set_timeout ,
-.BR sdbctl_set_key ,
-.B sdbctl_remove_entry
-and
-.B sdbctl_undo
-are advertised as well. Rebooting additionally requires an explicit
-.B reboot
-argument.
-.PP
-Every mutating result reports the snapshot identifier and the undo command, so
-a client can reverse what it just did.
+speaks the Model Context Protocol over stdio. It is read-only: it exposes
+.B sdbctl_status
+(what will this machine boot),
+.B sdbctl_list_entries
+(what boot options exist),
+.B sdbctl_check
+(will this boot fail),
+.B sdbctl_snapshots
+(what could be rolled back) and
+.B sdbctl_recommend
+(how would I make this change), and nothing else. There is no flag to enable
+mutating tools, because changing boot settings stays a deliberate act by a
+human at a terminal.
 .SH ENVIRONMENT
 .TP
 .B SDBCTL_EFIVARS

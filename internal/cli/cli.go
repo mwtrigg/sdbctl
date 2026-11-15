@@ -38,6 +38,7 @@ Verbs:
   rm <entry>         delete a boot entry (snapshot first, so it is undoable)
   undo               restore the most recent snapshot
   snapshots          list snapshots
+  recommend <goal>   suggest the commands for a goal ("boot fedora once"); never changes anything
   check              diagnostics; exits 1 when problems were found
   edit               launch the full-screen editor (also: -e)
   mcp                serve the same operations over stdio as an MCP server
@@ -84,9 +85,10 @@ var verbSpec = map[string]verbSpecs{
 	"rm":         {minArgs: 1, maxArgs: 1, needsESP: true},
 	"undo":       {needsESP: true},
 	"snapshots":  {needsESP: true},
+	"recommend":  {minArgs: 1, maxArgs: 2, needsESP: true},
 	"check":      {needsESP: true},
 	"edit":       {},
-	"mcp":        {boolFlags: map[string]bool{"allow-write": true}},
+	"mcp":        {},
 	"completion": {minArgs: 1, maxArgs: 1},
 	"version":    {},
 	"help":       {},
@@ -148,13 +150,6 @@ func splitGlobals(args []string, g *globals) ([]string, error) {
 				g.yes = true
 			case "quiet", "q":
 				g.quiet = true
-			case "check":
-				// Deprecated flag form of `sdbctl check`.
-				rest = append([]string{"check"}, rest...)
-			case "restore":
-				rest = append([]string{"undo"}, rest...)
-			case "list-backups":
-				rest = append([]string{"snapshots"}, rest...)
 			case "version", "V":
 				rest = append([]string{"version"}, rest...)
 			default:
@@ -198,11 +193,10 @@ func Main(args []string, stdout, stderr io.Writer) Invocation {
 
 	// Verb-specific flags.
 	var (
-		idsOnly    bool
-		reboot     bool
-		allowWrite bool
+		idsOnly bool
+		reboot  bool
 	)
-	positional, err := parseVerbFlags(verb, rest, &spec, &idsOnly, &reboot, &allowWrite)
+	positional, err := parseVerbFlags(verb, rest, &spec, &idsOnly, &reboot)
 	if err != nil {
 		fmt.Fprintf(stderr, "sdbctl: %v\n", err)
 		return Invocation{ExitCode: ExitUsage}
@@ -231,7 +225,7 @@ func Main(args []string, stdout, stderr io.Writer) Invocation {
 	case "edit":
 		return Invocation{LaunchTUI: true, ESPPath: g.esp, ExitCode: ExitOK}
 	case "mcp":
-		return Invocation{ExitCode: serveMCP(os.Stdin, stdout, stderr, g, allowWrite)}
+		return Invocation{ExitCode: serveMCP(os.Stdin, stdout, stderr, g)}
 	}
 
 	api, err := Resolve(g.esp)
@@ -313,6 +307,27 @@ func Main(args []string, stdout, stderr io.Writer) Invocation {
 		res, err := api.Undo()
 		return afterMutation(api, stdout, stderr, g, res, err)
 
+	case "recommend":
+		entry := ""
+		if len(positional) > 1 {
+			entry = positional[1]
+		}
+		recs, err := api.Recommend(positional[0], entry)
+		if err != nil {
+			fmt.Fprintf(stderr, "sdbctl: %v\n", err)
+			return Invocation{ExitCode: ExitFailure}
+		}
+		if g.json {
+			return emitJSON(stdout, map[string]any{"recommendations": recs})
+		}
+		for _, r := range recs {
+			fmt.Fprintf(stdout, "%s\n  %s\n", r.Command, r.Why)
+			if r.Effect != "" {
+				fmt.Fprintf(stdout, "  effect: %s\n", r.Effect)
+			}
+		}
+		return Invocation{ExitCode: ExitOK}
+
 	case "snapshots":
 		snaps, err := api.Snapshots()
 		if err != nil {
@@ -340,7 +355,7 @@ func Main(args []string, stdout, stderr io.Writer) Invocation {
 var Version = "dev"
 
 func parseVerbFlags(verb string, args []string, spec *verbSpecs,
-	idsOnly, reboot, allowWrite *bool) ([]string, error) {
+	idsOnly, reboot *bool) ([]string, error) {
 
 	var positional []string
 	tail := false
@@ -367,8 +382,6 @@ func parseVerbFlags(verb string, args []string, spec *verbSpecs,
 			*idsOnly = true
 		case verb == "boot" && name == "reboot":
 			*reboot = true
-		case verb == "mcp" && name == "allow-write":
-			*allowWrite = true
 		default:
 			return nil, fmt.Errorf("unknown flag %q for %s", a, verb)
 		}

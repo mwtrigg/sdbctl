@@ -418,11 +418,17 @@ func TestUsageErrors(t *testing.T) {
 	}
 }
 
-func TestLegacyFlagsStillWork(t *testing.T) {
+func TestCommandSurfaceIsCanonical(t *testing.T) {
 	esp := fakeESP(t)
-	// --check was the pre-rename form; it must keep working.
-	if code, _, _ := run(t, esp, "--check"); code != ExitFailure {
-		t.Errorf("--check should map to check (problems present): %d", code)
+
+	// The verbs are the only interface: the old flag forms are gone, so
+	// there is one obvious way to do each thing.
+	if code, _, errb := run(t, esp, "--check"); code != ExitUsage ||
+		!strings.Contains(errb, "unknown flag") {
+		t.Errorf("--check should not be a flag any more: code=%d %s", code, errb)
+	}
+	if code, _, _ := run(t, esp, "check"); code != ExitFailure {
+		t.Errorf("check should report the problems it finds: %d", code)
 	}
 	if code, out, _ := run(t, esp, "--version"); code != ExitOK || !strings.Contains(out, "sdbctl") {
 		t.Errorf("--version: %d %q", code, out)
@@ -454,4 +460,39 @@ func TestHelpAndCompletion(t *testing.T) {
 func oneShot(t *testing.T) (string, error) {
 	t.Helper()
 	return boot.GetOneShot()
+}
+
+func TestRecommendVerb(t *testing.T) {
+	esp := fakeESP(t)
+
+	code, out, errb := run(t, esp, "recommend", "boot fedora once")
+	if code != ExitOK {
+		t.Fatalf("recommend failed: %d %s", code, errb)
+	}
+	if !strings.Contains(out, "sdbctl boot fedora.conf") {
+		t.Errorf("recommendation should name the command:\n%s", out)
+	}
+	if !strings.Contains(out, "effect:") {
+		t.Errorf("recommendation should say what it would change:\n%s", out)
+	}
+
+	// JSON form, for agents.
+	code, out, _ = run(t, esp, "--json", "recommend", "make fedora the default")
+	if code != ExitOK {
+		t.Fatalf("json recommend failed: %d", code)
+	}
+	var payload struct {
+		Recommendations []Recommendation `json:"recommendations"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("recommend JSON does not decode: %v\n%s", err, out)
+	}
+	if len(payload.Recommendations) == 0 {
+		t.Error("no recommendations returned")
+	}
+	for _, r := range payload.Recommendations {
+		if r.Command == "" {
+			t.Errorf("recommendation without a command: %+v", r)
+		}
+	}
 }

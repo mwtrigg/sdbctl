@@ -10,7 +10,7 @@ import (
 )
 
 // mcpSession runs the MCP server over pipes and returns the responses.
-func mcpSession(t *testing.T, esp string, allowWrite bool, requests ...string) []map[string]any {
+func mcpSession(t *testing.T, esp string, requests ...string) []map[string]any {
 	t.Helper()
 
 	vars := filepath.Join(t.TempDir(), "efivars")
@@ -23,7 +23,7 @@ func mcpSession(t *testing.T, esp string, allowWrite bool, requests ...string) [
 	var out, errb bytes.Buffer
 
 	g := &globals{esp: esp}
-	if code := serveMCP(in, &out, &errb, g, allowWrite); code != ExitOK {
+	if code := serveMCP(in, &out, &errb, g); code != ExitOK {
 		t.Fatalf("mcp server exited with %d: %s", code, errb.String())
 	}
 
@@ -44,7 +44,7 @@ func mcpSession(t *testing.T, esp string, allowWrite bool, requests ...string) [
 func TestMCPInitializeAndList(t *testing.T) {
 	esp := fakeESP(t)
 
-	resp := mcpSession(t, esp, false,
+	resp := mcpSession(t, esp,
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
@@ -78,18 +78,27 @@ func TestMCPInitializeAndList(t *testing.T) {
 	if !names["sdbctl_status"] || !names["sdbctl_list_entries"] {
 		t.Errorf("read-only tools missing: %v", names)
 	}
-	// The write tools must not even be advertised without --allow-write.
-	for _, forbidden := range []string{"sdbctl_boot", "sdbctl_set_default", "sdbctl_remove_entry", "sdbctl_undo"} {
+	// The server is read-only: no tool that changes anything may exist.
+	for _, forbidden := range []string{
+		"sdbctl_boot", "sdbctl_set_default", "sdbctl_set_timeout",
+		"sdbctl_set_key", "sdbctl_remove_entry", "sdbctl_undo",
+	} {
 		if names[forbidden] {
-			t.Errorf("%s must not be advertised in read-only mode", forbidden)
+			t.Errorf("%s must not be advertised: the MCP server is read-only", forbidden)
 		}
+	}
+	if len(names) != 5 {
+		t.Errorf("expected exactly the five read-only tools, got %v", names)
+	}
+	if !names["sdbctl_recommend"] {
+		t.Errorf("the recommender tool should be offered: %v", names)
 	}
 }
 
 func TestMCPStatusCall(t *testing.T) {
 	esp := fakeESP(t)
 
-	resp := mcpSession(t, esp, false,
+	resp := mcpSession(t, esp,
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"sdbctl_status","arguments":{}}}`,
 	)
 	if len(resp) != 1 {
@@ -113,61 +122,32 @@ func TestMCPStatusCall(t *testing.T) {
 	}
 }
 
-func TestMCPWriteToolsGated(t *testing.T) {
+func TestMCPHasNoWriteTools(t *testing.T) {
 	esp := fakeESP(t)
 
-	resp := mcpSession(t, esp, false,
+	// Calling a mutating tool must be refused: the server does not even
+	// know it, so nothing can be changed through it.
+	resp := mcpSession(t, esp,
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"sdbctl_boot","arguments":{"entry":"fedora"}}}`,
 	)
-	result, _ := resp[0]["result"].(map[string]any)
-	if result["isError"] != true {
-		t.Fatalf("write tool should be refused in read-only mode: %v", result)
+	rpcErr, ok := resp[0]["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected a JSON-RPC error for a write tool, got %v", resp[0])
 	}
-	content, _ := result["content"].([]any)
-	first, _ := content[0].(map[string]any)
-	text, _ := first["text"].(string)
-	if !strings.Contains(text, "--allow-write") {
-		t.Errorf("refusal should say how to enable it: %q", text)
-	}
-}
-
-func TestMCPWriteToolsWithAllowWrite(t *testing.T) {
-	esp := fakeESP(t)
-
-	resp := mcpSession(t, esp, true,
-		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sdbctl_boot","arguments":{"entry":"fedora"}}}`,
-	)
-	listed, _ := resp[0]["result"].(map[string]any)
-	tools, _ := listed["tools"].([]any)
-	found := false
-	for _, tool := range tools {
-		m, _ := tool.(map[string]any)
-		if m["name"] == "sdbctl_boot" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("sdbctl_boot should be advertised with --allow-write")
+	if code, _ := rpcErr["code"].(float64); code != -32601 && code != -32602 {
+		t.Errorf("unexpected error code %v: %v", code, rpcErr)
 	}
 
-	result, _ := resp[1]["result"].(map[string]any)
-	if result["isError"] == true {
-		t.Fatalf("boot call failed: %v", result)
-	}
-	got, err := oneShot(t)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "fedora.conf" {
-		t.Errorf("one-shot = %q, want fedora.conf", got)
+	// And the machine must be untouched.
+	if got, _ := oneShot(t); got != "" {
+		t.Errorf("a one-shot was written through the MCP server: %q", got)
 	}
 }
 
 func TestMCPUnknownMethodAndTool(t *testing.T) {
 	esp := fakeESP(t)
 
-	resp := mcpSession(t, esp, false,
+	resp := mcpSession(t, esp,
 		`{"jsonrpc":"2.0","id":1,"method":"nonsense/method"}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sdbctl_nope","arguments":{}}}`,
 	)

@@ -4,8 +4,6 @@ Control systemd-boot from the command line — inspect what will boot, flip to a
 
 `sdbctl` is CLI-first: every operation is a verb with machine-readable output, so it works the same in a shell, in a script, and from an agent. A full-screen editor is still there (`sdbctl edit`) for the things a terminal UI is better at.
 
-> Formerly `sdboot-tui`. The repository, module and binary were renamed in v2.0; old installs keep working but will not receive updates.
-
 ---
 
 ## ⚠️ Safety
@@ -95,6 +93,7 @@ $ sudo sdbctl timeout 3
 | `rm <entry>` | Delete an entry (snapshotted first, so it is undoable) |
 | `undo` | Restore the most recent snapshot |
 | `snapshots` | List snapshots |
+| `recommend <goal>` | Suggest the commands for a goal ("boot fedora once"); never changes anything |
 | `check` | Full diagnostics; **exit 1 when problems were found** |
 | `edit`, `-e` | Launch the full-screen editor |
 | `mcp` | Serve the same operations over stdio as an MCP server |
@@ -134,11 +133,11 @@ Fields include `id`, `fullId`, `title`, `imageKeys`, `isDefault`, `isOneShot`, `
 
 ## MCP server
 
-`sdbctl mcp` speaks the Model Context Protocol over stdio, so an agent can inspect and change boot settings with the same semantics the CLI has:
+`sdbctl mcp` speaks the Model Context Protocol over stdio, so an agent can
+inspect a machine's boot setup with the same semantics the CLI has:
 
 ```bash
-sudo sdbctl mcp                 # read-only
-sudo sdbctl mcp --allow-write   # read/write
+sudo sdbctl mcp
 ```
 
 Point an MCP client at it:
@@ -148,20 +147,42 @@ Point an MCP client at it:
   "mcpServers": {
     "sdbctl": {
       "command": "sudo",
-      "args": ["sdbctl", "mcp", "--allow-write"]
+      "args": ["sdbctl", "mcp"]
     }
   }
 }
 ```
 
-Tools: `sdbctl_status`, `sdbctl_list_entries`, `sdbctl_check`, `sdbctl_snapshots`, and — only with `--allow-write` — `sdbctl_boot`, `sdbctl_set_default`, `sdbctl_set_timeout`, `sdbctl_set_key`, `sdbctl_remove_entry`, `sdbctl_undo`.
+Five tools, all read-only:
 
-Safety posture, deliberately conservative for a tool that edits the thing that boots the machine:
+| Tool | Answers |
+|------|---------|
+| `sdbctl_status` | *What will this machine boot?* Default entry, pending one-shot, last booted, loader state |
+| `sdbctl_list_entries` | *What boot options do I have?* Every entry, with the ones systemd-boot will hide marked |
+| `sdbctl_check` | *Is this boot going to fail?* The full diagnostics: missing files, conflicting keys, architecture mismatches, missing `root=`, loader drift |
+| `sdbctl_snapshots` | *What could I roll back to?* The snapshots taken before earlier changes |
+| `sdbctl_recommend` | *How do I make this change?* Given a goal in plain language, the exact commands to run and what each would change — grounded in the machine's actual state |
 
-- **read-only by default** — the write tools are not even advertised without `--allow-write`
-- rebooting requires both `--allow-write` and an explicit `reboot` argument
-- every mutating result reports the snapshot id and the undo command, so a client can roll back what it just did
-- results come back as both human-readable text and `structuredContent` JSON
+**The server cannot change anything.** There is no `--allow-write` and no
+mutating tool — not a hidden one, not a gated one. Changing boot settings
+stays a deliberate act by a human at a terminal, because a stray tool call on
+the wrong machine can leave it unbootable. The CLI verbs (`sdbctl boot`,
+`default`, `set`, `rm`, `undo`) remain the way to make changes.
+
+What the server *can* do is plan: `sdbctl_recommend` turns a goal into the
+commands to run, so an agent can answer "I want to boot the other distro
+next time — how?" with the exact command and what it would change, without
+touching anything.
+
+```console
+$ sdbctl recommend "boot fedora once"
+sudo sdbctl boot fedora.conf --reboot
+  fedora.conf boots once on the next restart and the machine restarts into it.
+  effect: sets LoaderEntryOneShot; the boot loader clears it after one boot
+```
+
+Results come back as both human-readable text and `structuredContent` JSON,
+and the JSON is the same schema `sdbctl --json` prints.
 
 ---
 

@@ -39,7 +39,7 @@ jobs:
         run: go test ./...
 
   boot-oracle:
-    # Verify sdboot-tui's "will systemd-boot show this entry?" predictions
+    # Verify sdbctl's "will systemd-boot show this entry?" predictions
     # against the real boot loader, booted under qemu + OVMF.
     name: boot loader oracle (qemu + OVMF)
     runs-on: ubuntu-latest
