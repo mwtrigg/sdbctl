@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render sdboot-tui screenshots for the README.
+"""Render sdbctl screenshots for the README.
 
 The binary is started inside a pseudo-terminal, driven with keystrokes, and
 the resulting screen is emulated with pyte. The screen is then converted to
@@ -251,7 +251,7 @@ def shot(session, out_dir, name, esp, cols):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=os.path.join(REPO, "assets"))
-    ap.add_argument("--bin", default=os.path.join(REPO, "sdboot-tui"))
+    ap.add_argument("--bin", default=os.path.join(REPO, "sdbctl"))
     ap.add_argument("--cols", type=int, default=120)
     ap.add_argument("--rows", type=int, default=34)
     ap.add_argument("--keep-sample", action="store_true")
@@ -263,7 +263,8 @@ def main():
     tmp = tempfile.mkdtemp(prefix="sdboot-shots-")
     esp = make_sample(tmp)
     os.makedirs(args.out, exist_ok=True)
-    cmd = [args.bin, "-esp", esp]
+    # The TUI is an explicit verb now: bare sdbctl prints the status report.
+    cmd = [args.bin, "-esp", esp, "edit"]
     try:
         s = Session(cmd, args.cols, args.rows)
         s.pump(1.6)

@@ -7,7 +7,7 @@ import (
 )
 
 // These targets treat the parsers and their round-trip writers as the risky
-// surface they are: sdboot-tui writes the files the firmware reads on the next
+// surface they are: sdbctl writes the files the firmware reads on the next
 // boot, so a panic, a crash-on-garbage, or a writer that is not idempotent can
 // turn an unrelated edit into an unbootable machine.
 //

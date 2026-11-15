@@ -1,4 +1,4 @@
-module github.com/mwtrigg/sdboot-tui
+module github.com/mwtrigg/sdbctl
 
 go 1.24.2
 
