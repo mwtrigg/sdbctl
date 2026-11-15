@@ -496,3 +496,17 @@ func TestRecommendVerb(t *testing.T) {
 		}
 	}
 }
+
+func TestHelpFlags(t *testing.T) {
+	// People type --help and -h; both must show the usage.
+	for _, arg := range []string{"help", "--help", "-h"} {
+		var out bytes.Buffer
+		inv := Main([]string{arg}, &out, &bytes.Buffer{})
+		if inv.ExitCode != ExitOK {
+			t.Errorf("%s: exit %d", arg, inv.ExitCode)
+		}
+		if !strings.Contains(out.String(), "sdbctl [verb]") {
+			t.Errorf("%s did not print the usage:\n%s", arg, out.String())
+		}
+	}
+}
