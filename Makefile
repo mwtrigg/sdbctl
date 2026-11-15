@@ -6,7 +6,7 @@ BINDIR    := $(PREFIX)/bin
 VERSION   := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS   := -s -w -X github.com/mwtrigg/sdboot-tui/internal/ui.AppVersion=$(VERSION)
 
-.PHONY: build install uninstall test clean
+.PHONY: build install uninstall test clean screenshots
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
@@ -22,3 +22,8 @@ test:
 
 clean:
 	rm -f $(BINARY)
+
+# Regenerate the README screenshots. Needs pyte (pip install pyte) and a
+# Chrome/Chromium binary; see tools/screenshot.py.
+screenshots: build
+	python3 tools/screenshot.py --out assets

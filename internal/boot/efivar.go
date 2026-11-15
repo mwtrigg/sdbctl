@@ -12,6 +12,10 @@ import (
 // The GUID is the systemd EFI variable namespace.
 const oneShotVarPath = "/sys/firmware/efi/efivars/LoaderEntryOneShot-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f"
 
+// lastBootedVarPath holds the full ID of the entry that was booted most
+// recently when default @saved is in effect (written by systemd-boot ≥ v253).
+const lastBootedVarPath = "/sys/firmware/efi/efivars/LoaderEntryLastBooted-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f"
+
 // efiVarAttrs is the standard attribute set for a runtime EFI variable:
 // EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS
 const efiVarAttrs uint32 = 0x07
@@ -23,10 +27,11 @@ const (
 	fsImmutableFL = 0x00000010
 )
 
-// GetOneShot reads the current LoaderEntryOneShot EFI variable and returns the
-// entry token (ID without .conf), or "" if the variable is not set.
-func GetOneShot() (string, error) {
-	data, err := os.ReadFile(oneShotVarPath)
+// readVarString reads an efivars sysfs file holding a NUL-terminated UTF-16LE
+// string (4-byte attributes header + payload). Returns "" if the variable
+// does not exist.
+func readVarString(path string) (string, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil
@@ -52,8 +57,24 @@ func GetOneShot() (string, error) {
 	return string(utf16.Decode(u16)), nil
 }
 
+// GetOneShot reads the current LoaderEntryOneShot EFI variable and returns the
+// full entry ID stored there (file name including .conf/.efi suffix), or "" if
+// the variable is not set. systemd-boot matches this value as a glob against
+// full entry IDs, so suffixed IDs are the safe form to write.
+func GetOneShot() (string, error) {
+	return readVarString(oneShotVarPath)
+}
+
+// GetLastBooted reads the LoaderEntryLastBooted EFI variable and returns the
+// full entry ID of the most recent @saved-style boot, or "" if unset
+// (also unset on systemd-boot < v253 or when @saved is not in use).
+func GetLastBooted() (string, error) {
+	return readVarString(lastBootedVarPath)
+}
+
 // SetOneShot writes entryID as the LoaderEntryOneShot EFI variable so that
-// systemd-boot boots it exactly once on the next restart.
+// systemd-boot boots it exactly once on the next restart. entryID should be
+// the full entry ID (including suffix); see GetOneShot.
 func SetOneShot(entryID string) error {
 	// If the variable already exists, clear its immutable flag first.
 	if _, err := os.Stat(oneShotVarPath); err == nil {

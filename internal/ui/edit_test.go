@@ -35,13 +35,14 @@ func TestValidateESPPathRejectsCRLF(t *testing.T) {
 		valid bool
 	}{
 		{"/valid/path", true},
+		{"valid/path", true}, // BLS: leading "/" is optional
 		{"/path/with spaces", false},
 		{"/path/with\ttab", false},
 		{"/path/with\nnewline", false},
 		{"/path/with\rCR", false},
 		{"/path/with\r\nCRLF", false},
 		{"/path/../traversal", false},
-		{"relative/path", false},
+		{"/path/with\\backslash", false},
 		{"/path/\x00null", false},
 	}
 	for _, tt := range tests {

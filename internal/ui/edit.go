@@ -54,6 +54,7 @@ func (m *model) enterEntryEditMode() tea.Cmd {
 	draft.Initrds = append([]string(nil), m.entry.Initrds...)
 	draft.Options = append([]string(nil), m.entry.Options...)
 	draft.DTOOverlays = append([]string(nil), m.entry.DTOOverlays...)
+	draft.Extras = append([]string(nil), m.entry.Extras...)
 	m.draftEntry = &draft
 	m.buildEntryFields()
 	return m.resetEditInput()
@@ -79,6 +80,10 @@ func (m *model) confirmDelete() {
 		return
 	}
 	path := filepath.Join(m.espPath, "loader", "entries", m.entry.ID+".conf")
+	// Snapshot the entry first: deleting is undoable.
+	if !m.backupBefore("loader/entries/" + m.entry.ID + ".conf") {
+		return
+	}
 	if err := os.Remove(path); err != nil {
 		m.err = err
 		return
@@ -164,9 +169,38 @@ func (m *model) buildEntryFields() {
 			get:      func() string { return e.Linux },
 			set:      func(v string) { e.Linux = strings.TrimSpace(v) },
 			isPath:   true,
-			required: true,
 			validate: validateESPPath,
-			help:     "Kernel image path relative to ESP root (e.g. /vmlinuz-linux). Tab for completion.",
+			help:     "Kernel image path relative to the boot partition (e.g. /vmlinuz-linux). Tab for completion. Exactly one of linux/efi/uki/uki-url must be set.",
+		},
+		{
+			label:    "efi",
+			get:      func() string { return e.Efi },
+			set:      func(v string) { e.Efi = strings.TrimSpace(v) },
+			isPath:   true,
+			validate: validateESPPath,
+			help:     "Arbitrary EFI program to boot instead of a kernel, e.g. /EFI/Microsoft/Boot/bootmgfw.efi for Windows. The file must live on the SAME boot partition as this entry. Exactly one of linux/efi/uki/uki-url must be set.",
+		},
+		{
+			label:    "uki",
+			get:      func() string { return e.UKI },
+			set:      func(v string) { e.UKI = strings.TrimSpace(v) },
+			isPath:   true,
+			validate: validateESPPath,
+			help:     "Unified Kernel Image path (outside EFI/Linux/), booted with UKI semantics. Exactly one of linux/efi/uki/uki-url must be set.",
+		},
+		{
+			label:    "uki-url",
+			get:      func() string { return e.UKIUrl },
+			set:      func(v string) { e.UKIUrl = strings.TrimSpace(v) },
+			validate: validateUKIUrl,
+			help:     "Network-booted UKI as an RFC 3986 URL, or ':name.efi' to reuse the URL the loader was fetched from. Hidden unless the loader was network-booted.",
+		},
+		{
+			label:    "profile",
+			get:      func() string { return e.Profile },
+			set:      func(v string) { e.Profile = strings.TrimSpace(v) },
+			validate: validateProfile,
+			help:     "Profile number for multi-profile UKIs (0 or empty = default profile). Only valid with uki/uki-url.",
 		},
 	}...)
 
@@ -241,6 +275,23 @@ func (m *model) buildEntryFields() {
 		})
 	}
 
+	// One field per extra resource (credentials, extension images, addons).
+	for i := range e.Extras {
+		idx := i
+		label := "extra"
+		if len(e.Extras) > 1 {
+			label = fmt.Sprintf("extra[%d]", idx)
+		}
+		fields = append(fields, fieldDesc{
+			label:    label,
+			get:      func() string { return e.Extras[idx] },
+			set:      func(v string) { e.Extras[idx] = strings.TrimSpace(v) },
+			isPath:   true,
+			validate: validateESPPath,
+			help:     "Companion resource passed to the kernel/UKI: *.cred, *.sysext.raw, *.confext.raw or *.addon.efi.",
+		})
+	}
+
 	m.editFields = fields
 }
 
@@ -272,13 +323,19 @@ func (m *model) buildLoaderFields() {
 			get:      func() string { return lc.Timeout },
 			set:      func(v string) { lc.Timeout = strings.TrimSpace(v) },
 			validate: validateTimeout,
-			help:     "Seconds before auto-boot. 0=immediate. 'menu-force'=always show menu. 'menu-hidden'=no countdown.",
+			help:     "Seconds before auto-boot. 0/menu-hidden=no menu (hold a key to show it). 'menu-disabled' blocks the menu entirely. 'menu-force'=always show menu.",
 		},
 		{
 			label: "default",
 			get:   func() string { return lc.Default },
 			set:   func(v string) { lc.Default = strings.TrimSpace(v) },
-			help:  "Default entry filename or glob (e.g. 'arch.conf'). '@saved' uses last-booted entry.",
+			help:  "Glob selecting the default entry by full ID, which INCLUDES the .conf suffix (e.g. 'arch.conf', 'linux-6.*'). '@saved' remembers the last booted entry.",
+		},
+		{
+			label: "preferred",
+			get:   func() string { return lc.Preferred },
+			set:   func(v string) { lc.Preferred = strings.TrimSpace(v) },
+			help:  "Glob like default, but entries marked bad by boot counting are skipped first (systemd ≥ 259).",
 		},
 		{
 			label:    "editor",
@@ -299,7 +356,7 @@ func (m *model) buildLoaderFields() {
 			get:      boolGet(lc.AutoEntries),
 			set:      boolSet(&lc.AutoEntries),
 			validate: validateBoolField,
-			help:     "Auto-add entries for other EFI bootloaders found on the ESP (yes/no).",
+			help:     "Auto-add entries for other EFI bootloaders found on the ESP — this is what shows Windows/macOS/EFI-shell (yes/no).",
 		},
 		{
 			label:    "auto-firmware",
@@ -313,14 +370,14 @@ func (m *model) buildLoaderFields() {
 			get:      boolGet(lc.AutoReboot),
 			set:      boolSet(&lc.AutoReboot),
 			validate: validateBoolField,
-			help:     "Automatically reboot after menu timeout with no input (yes/no).",
+			help:     "Show a 'Reboot The System' entry in the boot menu (yes/no, default no).",
 		},
 		{
 			label:    "auto-poweroff",
 			get:      boolGet(lc.AutoPowerOff),
 			set:      boolSet(&lc.AutoPowerOff),
 			validate: validateBoolField,
-			help:     "Automatically power off after menu timeout with no input (yes/no).",
+			help:     "Show a 'Power Off The System' entry in the boot menu (yes/no, default no).",
 		},
 		{
 			label:    "beep",
@@ -330,11 +387,39 @@ func (m *model) buildLoaderFields() {
 			help:     "Beep on boot menu navigation (yes/no). Requires a PC speaker.",
 		},
 		{
+			label:    "reboot-for-bitlocker",
+			get:      boolGet(lc.RebootForBitlocker),
+			set:      boolSet(&lc.RebootForBitlocker),
+			validate: validateBoolField,
+			help:     "Work around BitLocker recovery prompts when Windows Boot Manager is selected (yes/no, default no). Experimental.",
+		},
+		{
 			label:    "reboot-on-error",
 			get:      func() string { return lc.RebootOnError },
 			set:      func(v string) { lc.RebootOnError = strings.TrimSpace(v) },
 			validate: validateRebootOnError,
 			help:     "Action on boot failure: yes (reboot), no (halt), auto (firmware default).",
+		},
+		{
+			label:    "secure-boot-enroll",
+			get:      func() string { return lc.SecureBootEnroll },
+			set:      func(v string) { lc.SecureBootEnroll = strings.TrimSpace(v) },
+			validate: validateSecureBootEnroll,
+			help:     "Auto-enroll Secure Boot key sets from /loader/keys/: if-safe (default), manual, off, force. Can soft-brick firmware — see loader.conf(5).",
+		},
+		{
+			label:    "secure-boot-enroll-action",
+			get:      func() string { return lc.SecureBootEnrollAction },
+			set:      func(v string) { lc.SecureBootEnrollAction = strings.TrimSpace(v) },
+			validate: validateEnrollAction,
+			help:     "After enrollment: reboot (default) or shutdown (systemd ≥ 258).",
+		},
+		{
+			label:    "secure-boot-enroll-timeout-sec",
+			get:      func() string { return lc.SecureBootEnrollTimeoutSec },
+			set:      func(v string) { lc.SecureBootEnrollTimeoutSec = strings.TrimSpace(v) },
+			validate: validateEnrollTimeout,
+			help:     "Warning countdown before enrolling keys, seconds or 'hidden' (systemd ≥ 259).",
 		},
 		{
 			label:    "log-level",
@@ -404,6 +489,21 @@ func (m *model) prepareCommit() {
 			}
 		}
 	}
+
+	// Cross-field check: a Type #1 entry needs exactly one of the image
+	// keys; systemd-boot drops entries with none or with several.
+	if m.draftEntry != nil {
+		if keys := m.draftEntry.ImageKeys(); len(keys) != 1 {
+			if len(keys) == 0 {
+				m.validationErr = "set exactly one of linux, efi, uki or uki-url"
+			} else {
+				m.validationErr = "only one of linux/efi/uki/uki-url may be set (found: " +
+					strings.Join(keys, ", ") + ")"
+			}
+			return
+		}
+	}
+
 	m.validationErr = ""
 
 	m.confirmDiff = m.buildDiff()
@@ -413,17 +513,26 @@ func (m *model) prepareCommit() {
 // finalizeCommit writes the confirmed draft to disk.
 func (m *model) finalizeCommit() {
 	m.editing = false
+	m.editInput.Blur()
 	m.confirming = false
 	m.editFields = nil
 	m.completions = nil
 	m.showCompletions = false
 	m.confirmDiff = nil
 
-	if m.focused == paneDetail {
+	// Which draft is active decides what gets written — not which pane
+	// happens to be focused.
+	switch {
+	case m.draftEntry != nil:
 		m.entry = m.draftEntry
 		m.entries[m.selected] = m.draftEntry // keep slice in sync
 		if m.creating {
 			path := filepath.Join(m.espPath, "loader", "entries", m.draftEntry.ID+".conf")
+			// A brand new file has nothing to snapshot, but an existing
+			// file with the same name would be overwritten.
+			if !m.backupBefore("loader/entries/" + m.draftEntry.ID + ".conf") {
+				return
+			}
 			if err := m.draftEntry.Write(path); err != nil {
 				m.err = err
 			}
@@ -433,7 +542,7 @@ func (m *model) finalizeCommit() {
 		}
 		m.draftEntry = nil
 		m.refreshEntryMeta()
-	} else {
+	case m.draftLoader != nil:
 		m.loaderConf = m.draftLoader
 		m.draftLoader = nil
 		m.saveLoaderConf()
@@ -460,22 +569,28 @@ func (m *model) buildDiff() []diffLine {
 		return "no"
 	}
 
-	if m.focused == paneDetail && m.entry != nil && m.draftEntry != nil {
+	if m.draftEntry != nil && m.entry != nil {
 		e, d := m.entry, m.draftEntry
 		add("title", e.Title, d.Title)
 		add("version", e.Version, d.Version)
 		add("sort-key", e.SortKey, d.SortKey)
 		add("linux", e.Linux, d.Linux)
+		add("efi", e.Efi, d.Efi)
+		add("uki", e.UKI, d.UKI)
+		add("uki-url", e.UKIUrl, d.UKIUrl)
+		add("profile", e.Profile, d.Profile)
 		add("initrd", strings.Join(e.Initrds, ", "), strings.Join(d.Initrds, ", "))
 		add("options", strings.Join(e.Options, " "), strings.Join(d.Options, " "))
 		add("machine-id", e.MachineID, d.MachineID)
 		add("architecture", e.Architecture, d.Architecture)
 		add("devicetree", e.Devicetree, d.Devicetree)
 		add("devicetree-overlay", strings.Join(e.DTOOverlays, ", "), strings.Join(d.DTOOverlays, ", "))
-	} else if m.focused == paneLoader && m.loaderConf != nil && m.draftLoader != nil {
+		add("extra", strings.Join(e.Extras, ", "), strings.Join(d.Extras, ", "))
+	} else if m.draftLoader != nil && m.loaderConf != nil {
 		l, d := m.loaderConf, m.draftLoader
 		add("timeout", l.Timeout, d.Timeout)
 		add("default", l.Default, d.Default)
+		add("preferred", l.Preferred, d.Preferred)
 		add("editor", boolStr(l.Editor), boolStr(d.Editor))
 		add("console-mode", l.ConsoleMode, d.ConsoleMode)
 		add("auto-entries", boolStr(l.AutoEntries), boolStr(d.AutoEntries))
@@ -483,7 +598,11 @@ func (m *model) buildDiff() []diffLine {
 		add("auto-reboot", boolStr(l.AutoReboot), boolStr(d.AutoReboot))
 		add("auto-poweroff", boolStr(l.AutoPowerOff), boolStr(d.AutoPowerOff))
 		add("beep", boolStr(l.Beep), boolStr(d.Beep))
+		add("reboot-for-bitlocker", boolStr(l.RebootForBitlocker), boolStr(d.RebootForBitlocker))
 		add("reboot-on-error", l.RebootOnError, d.RebootOnError)
+		add("secure-boot-enroll", l.SecureBootEnroll, d.SecureBootEnroll)
+		add("secure-boot-enroll-action", l.SecureBootEnrollAction, d.SecureBootEnrollAction)
+		add("secure-boot-enroll-timeout-sec", l.SecureBootEnrollTimeoutSec, d.SecureBootEnrollTimeoutSec)
 		add("log-level", l.LogLevel, d.LogLevel)
 	}
 
@@ -510,6 +629,7 @@ func (m *model) cancelEdit() {
 	m.showCompletions = false
 	m.validationErr = ""
 	m.editing = false
+	m.editInput.Blur()
 	m.confirming = false
 	m.confirmDiff = nil
 }
@@ -586,6 +706,14 @@ func (m *model) appendListField() {
 		m.buildEntryFields()
 		for i, f := range m.editFields {
 			if strings.HasPrefix(f.label, "devicetree-overlay") {
+				m.editFieldIdx = i
+			}
+		}
+	case strings.HasPrefix(label, "extra"):
+		e.Extras = append(e.Extras, "")
+		m.buildEntryFields()
+		for i, f := range m.editFields {
+			if strings.HasPrefix(f.label, "extra") {
 				m.editFieldIdx = i
 			}
 		}
@@ -674,17 +802,16 @@ func validateEntryID(s string) string {
 	return ""
 }
 
-// validateESPPath checks that s is a valid absolute ESP-relative path:
-// must start with /, no spaces, no newlines, no null bytes, no .. traversal.
+// validateESPPath checks that s is a valid path relative to the boot
+// partition root. The Boot Loader Specification allows an optional leading
+// "/"; both forms are accepted. Spaces, backslashes, newlines, null bytes and
+// ".." traversal are rejected.
 func validateESPPath(s string) string {
 	if s == "" {
-		return "" // handled by required check
+		return "" // handled by required / cross-field checks
 	}
-	if !strings.HasPrefix(s, "/") {
-		return "must be an absolute path starting with /"
-	}
-	if strings.ContainsAny(s, " \t\x00") {
-		return "must not contain spaces or null bytes"
+	if strings.ContainsAny(s, " \t\x00\\") {
+		return "must not contain spaces, backslashes or null bytes"
 	}
 	if strings.ContainsAny(s, "\n\r") {
 		return "must not contain newlines"
@@ -706,19 +833,19 @@ func validateNoNewlines(s string) string {
 	return ""
 }
 
-// validateTimeout mirrors the loader.conf spec: a non-negative integer, or one
-// of the special tokens menu-force / menu-hidden.
+// validateTimeout mirrors the loader.conf spec: a non-negative integer, or
+// one of the special tokens menu-force / menu-hidden / menu-disabled.
 func validateTimeout(s string) string {
 	if s == "" {
 		return ""
 	}
 	switch s {
-	case "menu-force", "menu-hidden":
+	case "menu-force", "menu-hidden", "menu-disabled":
 		return ""
 	}
 	for _, c := range s {
 		if c < '0' || c > '9' {
-			return "must be a number of seconds, \"menu-force\", or \"menu-hidden\""
+			return "must be a number of seconds, \"menu-force\", \"menu-hidden\" or \"menu-disabled\""
 		}
 	}
 	return ""
@@ -798,4 +925,72 @@ func validateLogLevelField(s string) string {
 		return ""
 	}
 	return "must be one of: emerg, alert, crit, err, warning, notice, info, debug"
+}
+
+// validateUKIUrl accepts absolute URLs or the ":filename.efi" shorthand that
+// resolves relative to the network boot source.
+func validateUKIUrl(s string) string {
+	if s == "" {
+		return ""
+	}
+	if strings.ContainsAny(s, " \t\x00\n\r") {
+		return "must not contain spaces or control characters"
+	}
+	if strings.HasPrefix(s, ":") {
+		return ""
+	}
+	if !strings.Contains(s, "://") {
+		return "must be a URL with a scheme (e.g. https://…) or :filename.efi"
+	}
+	return ""
+}
+
+// validateProfile accepts an unsigned integer profile number or empty.
+func validateProfile(s string) string {
+	if s == "" {
+		return ""
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return "must be a non-negative integer"
+		}
+	}
+	return ""
+}
+
+// validateSecureBootEnroll mirrors the loader.conf secure-boot-enroll spec.
+func validateSecureBootEnroll(s string) string {
+	if s == "" {
+		return ""
+	}
+	switch s {
+	case "if-safe", "manual", "off", "force":
+		return ""
+	}
+	return "must be if-safe, manual, off, or force"
+}
+
+// validateEnrollAction mirrors loader.conf secure-boot-enroll-action.
+func validateEnrollAction(s string) string {
+	if s == "" {
+		return ""
+	}
+	switch s {
+	case "reboot", "shutdown":
+		return ""
+	}
+	return "must be reboot or shutdown"
+}
+
+// validateEnrollTimeout accepts a whole-second count or "hidden".
+func validateEnrollTimeout(s string) string {
+	if s == "" || s == "hidden" {
+		return ""
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return "must be a number of seconds or \"hidden\""
+		}
+	}
+	return ""
 }

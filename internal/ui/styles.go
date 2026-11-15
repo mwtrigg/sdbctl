@@ -83,6 +83,10 @@ var (
 				Foreground(lipgloss.Color("#B48EAD")). // Nord aurora purple
 				Bold(true)
 
+	BootedBadgeStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#A3BE8C")). // Nord frost green
+				Bold(true)
+
 	DefaultBadgeStyle = lipgloss.NewStyle().
 				Foreground(ColorAmber).
 				Bold(true)
@@ -115,6 +119,6 @@ var (
 			Bold(true).
 			Foreground(lipgloss.Color("#FFFFFF"))
 
-	AppVersion = "v1.1.0"
+	AppVersion = "v1.2.0"
 	AppRepo    = "https://github.com/mwtrigg/sdboot-tui"
 )

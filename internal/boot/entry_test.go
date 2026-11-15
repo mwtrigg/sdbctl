@@ -3,6 +3,7 @@ package boot
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -163,6 +164,47 @@ func TestParseEntriesNonExistent(t *testing.T) {
 	}
 	if entries != nil {
 		t.Error("expected nil for non-existent dir")
+	}
+}
+
+// TestParseTestdata parses the sample ESP layout shipped in testdata/ — a
+// cheap regression fixture covering multi-initrd entries and an "efi"
+// chainload entry.
+func TestParseTestdata(t *testing.T) {
+	esp := filepath.Join("..", "..", "testdata")
+
+	cfg, err := ParseLoaderConf(filepath.Join(esp, "loader", "loader.conf"))
+	if err != nil {
+		t.Fatalf("sample loader.conf must parse: %v", err)
+	}
+	if len(cfg.Issues) > 0 {
+		t.Errorf("sample loader.conf has issues: %v", cfg.Issues)
+	}
+
+	entries, err := ParseAllEntries(esp)
+	if err != nil {
+		t.Fatalf("sample entries must parse: %v", err)
+	}
+
+	var windows *BootEntry
+	byID := map[string]*BootEntry{}
+	for _, e := range entries {
+		byID[e.ID] = e
+		if e.Efi != "" {
+			windows = e
+		}
+	}
+	if windows == nil {
+		t.Fatal("no efi-key entry found in testdata")
+	}
+	if len(windows.ImageKeys()) != 1 {
+		t.Errorf("windows entry image keys: %v", windows.ImageKeys())
+	}
+	if got := byID["fedora"]; got == nil || len(got.Initrds) != 2 {
+		t.Errorf("fedora entry should carry two initrds: %+v", got)
+	}
+	if !MatchEntryID(cfg.Default, byID["arch"].FullID()) {
+		t.Errorf("sample default %q should select the arch entry", cfg.Default)
 	}
 }
 
@@ -359,5 +401,149 @@ func TestWriteFileAtomic(t *testing.T) {
 	}
 	if string(data) != "overwritten\n" {
 		t.Errorf("expected 'overwritten\\n', got %q", string(data))
+	}
+}
+
+func TestParseEntryEFIKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	entryPath := filepath.Join(tmpDir, "windows.conf")
+
+	// A chainload entry for Windows, the way users create them for
+	// dual-boot (SuperUser/Reddit: "Windows entry does not appear").
+	content := `# Created by: sdboot-tui
+title Windows Boot Manager
+efi /EFI/Microsoft/Boot/bootmgfw.efi
+`
+	if err := os.WriteFile(entryPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	entry, err := ParseEntry(entryPath)
+	if err != nil {
+		t.Fatalf("ParseEntry failed: %v", err)
+	}
+	if entry.Efi != "/EFI/Microsoft/Boot/bootmgfw.efi" {
+		t.Errorf("efi: got %q", entry.Efi)
+	}
+	if keys := entry.ImageKeys(); len(keys) != 1 || keys[0] != "efi" {
+		t.Errorf("ImageKeys: got %v, want [efi]", keys)
+	}
+	if entry.FullID() != "windows.conf" {
+		t.Errorf("FullID: got %q", entry.FullID())
+	}
+}
+
+func TestParseEntryUKIAndExtraKeys(t *testing.T) {
+	tmpDir := t.TempDir()
+	entryPath := filepath.Join(tmpDir, "image.conf")
+
+	content := `title My OS
+version 1.2.3
+uki /myos/1.2.3/img.efi
+profile 0
+extra /myos/1.2.3/foo.cred
+extra /myos/1.2.3/bar.sysext.raw
+`
+	if err := os.WriteFile(entryPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	entry, err := ParseEntry(entryPath)
+	if err != nil {
+		t.Fatalf("ParseEntry failed: %v", err)
+	}
+	if entry.UKI != "/myos/1.2.3/img.efi" {
+		t.Errorf("uki: got %q", entry.UKI)
+	}
+	if entry.Profile != "0" {
+		t.Errorf("profile: got %q", entry.Profile)
+	}
+	if len(entry.Extras) != 2 {
+		t.Fatalf("extras: got %v", entry.Extras)
+	}
+
+	// Round-trip must keep both extra lines and the uki key.
+	out := filepath.Join(tmpDir, "out.conf")
+	if err := entry.Write(out); err != nil {
+		t.Fatal(err)
+	}
+	reparsed, err := ParseEntry(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reparsed.UKI != entry.UKI || len(reparsed.Extras) != 2 {
+		t.Errorf("round-trip lost uki/extra: %+v", reparsed)
+	}
+}
+
+func TestWriteRoundTripRemovesClearedFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	entryPath := filepath.Join(tmpDir, "clear.conf")
+
+	content := `title My Entry
+version 6.8.8-arch1-1
+options root=UUID=deadbeef rw
+linux /vmlinuz
+initrd /initramfs-linux.img
+initrd /second.img
+`
+	if err := os.WriteFile(entryPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	entry, err := ParseEntry(entryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Clearing fields in the UI sets them to "" — the saved file must lose
+	// the corresponding lines, not keep the old values (regression).
+	entry.Version = ""
+	entry.Options = nil
+	entry.Initrds = []string{entry.Initrds[0], ""} // Ctrl+N left empty
+
+	out := filepath.Join(tmpDir, "out.conf")
+	if err := entry.Write(out); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	if strings.Contains(s, "version") {
+		t.Errorf("cleared version survived:\n%s", s)
+	}
+	if strings.Contains(s, "options") {
+		t.Errorf("cleared options survived:\n%s", s)
+	}
+	if strings.Contains(s, "second.img") {
+		t.Errorf("removed initrd survived:\n%s", s)
+	}
+	if strings.Count(s, "initrd ") != 1 {
+		t.Errorf("expected exactly one initrd line:\n%s", s)
+	}
+	if !strings.Contains(s, "linux /vmlinuz") || !strings.Contains(s, "title My Entry") {
+		t.Errorf("unexpected content:\n%s", s)
+	}
+}
+
+func TestStripEntrySuffixAndFullID(t *testing.T) {
+	if got := StripEntrySuffix("Arch.conf"); got != "Arch" {
+		t.Errorf("StripEntrySuffix(Arch.conf) = %q", got)
+	}
+	if got := StripEntrySuffix("linux-6.9.efi"); got != "linux-6.9" {
+		t.Errorf("StripEntrySuffix(linux-6.9.efi) = %q", got)
+	}
+	if got := StripEntrySuffix("no-suffix"); got != "no-suffix" {
+		t.Errorf("StripEntrySuffix(no-suffix) = %q", got)
+	}
+	uki := &BootEntry{ID: "Fedora", IsUKI: true, FileSuffix: ".uki"}
+	if uki.FullID() != "Fedora.uki" {
+		t.Errorf("UKI FullID: got %q", uki.FullID())
+	}
+	conf := &BootEntry{ID: "arch", FileSuffix: ".conf"}
+	if conf.FullID() != "arch.conf" {
+		t.Errorf("Type1 FullID: got %q", conf.FullID())
 	}
 }

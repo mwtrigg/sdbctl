@@ -97,7 +97,7 @@ func (m *model) detailPane(leftColWidth int) string {
 					if f.isPath {
 						content.WriteString(" " + FieldHelpStyle.Render("Tab: path completion") + "\n")
 					}
-					if strings.HasPrefix(f.label, "initrd") || strings.HasPrefix(f.label, "devicetree-overlay") {
+					if strings.HasPrefix(f.label, "initrd") || strings.HasPrefix(f.label, "devicetree-overlay") || strings.HasPrefix(f.label, "extra") {
 						content.WriteString(" " + FieldHelpStyle.Render("Ctrl+N: add another line") + "\n")
 					}
 					if f.required {
@@ -132,6 +132,10 @@ func (m *model) detailPane(leftColWidth int) string {
 				{"sort-key", m.entry.SortKey},
 				{"architecture", m.entry.Architecture},
 				{"linux", m.entry.Linux},
+				{"efi", m.entry.Efi},
+				{"uki", m.entry.UKI},
+				{"uki-url", m.entry.UKIUrl},
+				{"profile", m.entry.Profile},
 			}
 
 			for _, f := range fields {
@@ -154,11 +158,28 @@ func (m *model) detailPane(leftColWidth int) string {
 				}
 			}
 
+			if m.entry.Devicetree != "" {
+				content.WriteString("\n")
+				content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("devicetree:"), ValueStyle.Render(m.entry.Devicetree)))
+			}
+
 			if len(m.entry.DTOOverlays) > 0 {
 				content.WriteString("\n")
 				for _, dto := range m.entry.DTOOverlays {
 					content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("devicetree-overlay:"), ValueStyle.Render(dto)))
 				}
+			}
+
+			if len(m.entry.Extras) > 0 {
+				content.WriteString("\n")
+				for _, extra := range m.entry.Extras {
+					content.WriteString(fmt.Sprintf(" %s %s\n", KeyStyle.Render("extra:"), ValueStyle.Render(extra)))
+				}
+			}
+
+			if m.lastBooted != "" && m.lastBooted == m.entry.ID {
+				content.WriteString("\n")
+				content.WriteString(" " + BootedBadgeStyle.Render("● last booted entry") + "\n")
 			}
 
 			if m.oneShotAvail && m.oneShotEntry == m.entry.ID {
